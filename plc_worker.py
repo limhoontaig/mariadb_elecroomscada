@@ -2,58 +2,21 @@
 import serial
 import struct
 import time
-from datetime import datetime
-import db_manager 
+from datetime import datetime, timedelta
+
+from db_manager import DATA_LABELS, get_db_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
 
 COM_PORT = 'COM3'         
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
 NUM_WORDS = 50            
 
-def calculate_crc(data):
-    """Modbus RTU 표준 패킷 검증용 CRC-16 연산 함수"""
-    crc = 0xFFFF
-    for pos in data:
-        crc ^= pos
-        for _ in range(8):
-            if (crc & 1) != 0:
-                crc >>= 1
-                crc ^= 0xA001
-            else:
-                crc >>= 1
-    return crc
-
-def parse_plc_payload(payload):
-    """
-    PLC로부터 수신한 100바이트 바이너리 페이로드를 
-    50개의 정수형(Word) 데이터 배열로 파싱 및 10/100 배율 보정을 수행합니다.
-    """
-    # Big-Endian unsigned short(H) 50개 파싱
-    fmt = '>' + 'H' * NUM_WORDS
-    raw_words = struct.unpack(fmt, payload)
-    
-    # 하드웨어 사양에 따른 소수점 보정 필드 그룹화
-    DIV_BY_10 = {"실내온도", "외기온도", "SF운전시간", "EF운전시간", "Tr1_Temp", "Tr2_Temp", "Tr3_Temp"}
-    DIV_BY_100 = {"KEP_A_R", "KEP_A_S", "KEP_A_T", "KEP_frequency", "KEP_V_R", "KEP_V_S", "KEP_V_T", "KEP_V_R_S", "KEP_V_S_T", "KEP_V_T_R", "KEP_P_mWh"}
-    
-    adjusted_values = []
-    for label, val in zip(db_manager.DATA_LABELS, raw_words):
-        if label in DIV_BY_10: 
-            adjusted_values.append(val / 10.0)
-        elif label in DIV_BY_100: 
-            adjusted_values.append(val / 100.0)
-        else: 
-            adjusted_values.append(float(val))
-            
-    return adjusted_values
-
 def serial_receive_thread():
-    """백그라운드에서 PLC 패킷을 실시간 수신하여 정제 및 저장을 요청하는 메인 루프 스레드"""
     try:
         ser = serial.Serial(port=COM_PORT, baudrate=BAUD_RATE, timeout=0.1)
-        print(f"🔌 [통신 엔진] {COM_PORT} 포트가 성공적으로 개방되었습니다. (@{BAUD_RATE}bps)")
+        print(f"통신 엔진 가동 완료: {COM_PORT} @ {BAUD_RATE}")
     except Exception as e:
-        print(f"❌ [통신 엔진 에러] 시리얼 포트 개방 실패: {e}")
+        print(f"시리얼 포트 개방 실패: {e}")
         return
 
     buffer = b""
@@ -63,54 +26,99 @@ def serial_receive_thread():
                 buffer += ser.read(ser.in_waiting)
                 
                 while len(buffer) >= 7:
-                    # 국번 확인 코드 (Slave ID 매칭)
                     if buffer[0] != MY_SLAVE_ID:
                         buffer = buffer[1:]
                         continue
                     
-                    # 펑션코드 확인 (Modbus Write Multiple Registers: 0x10)
                     func_code = buffer[1]
                     if func_code == 0x10:
                         expected_len = 7 + (NUM_WORDS * 2) + 2 
                         
                         if len(buffer) < expected_len: 
-                            break # 데이터가 다 올 때까지 대기
+                            break 
                         
                         packet = buffer[:expected_len]
-                        buffer = buffer[expected_len:]
                         
-                        # CRC 패킷 검증 연산
-                        received_crc = struct.unpack('<H', packet[-2:])[0]
-                        calc_crc = calculate_crc(packet[:-2])
-                        
-                        if received_crc != calc_crc:
-                            print(f"⚠️ [통신 경고] Modbus 패킷 CRC 에러 검출 -> 패킷 폐기")
-                            continue
-                        
-                        # 데이터 페이로드 영역 추출
-                        payload = packet[7:-2]
-                        
-                        # 데이터 정제 함수 호출
-                        adjusted_data = parse_plc_payload(payload)
-                        
-                        # 현재 시간 생성
-                        now = datetime.now()
-                        log_date = now.strftime('%Y-%m-%d')
-                        log_time = now.strftime('%H:%M:%S')
-                        
-                        # db_manager 창구에 안전하게 저장 위임
-                        success = db_manager.save_plc_raw_data(log_date, log_time, adjusted_data)
-                        if success:
-                            print(f"💾 [통신 엔진] PLC 수집 데이터가 MariaDB에 정상 실시간 동기화되었습니다. ({log_time})")
-                        else:
-                            print(f"❌ [DB 경고] db_manager가 PLC 데이터를 수락하지 못했습니다.")
+                        if verify_crc(packet):
+                            raw_values = packet[7:7+(NUM_WORDS * 2)]
                             
+                            # 50개 워드를 각각 안전하게 가져옵니다.
+                            raw_words = struct.unpack(f'>{NUM_WORDS}h', raw_values)
+                            
+                            # KEP_P_mWh 가 위치한 D915, D916 자리 추출
+                            word_1 = raw_words[15]   
+                            word_2 = raw_words[16]   
+                            
+                            u_word1 = word_1 if word_1 >= 0 else word_1 + 65536
+                            u_word2 = word_2 if word_2 >= 0 else word_2 + 65536
+                            
+                            # 💡 현장 계측기 값과 상하위 워드 순서 확인용 수식 (반전 필요시 아래 주석 체인지)
+                            # dint_mwh = (u_word1 << 16) + u_word2
+                            dint_mwh = (u_word2 << 16) + u_word1
+                            
+                            if dint_mwh & 0x80000000:
+                                dint_mwh -= 0x100000000
+                                
+                            # 2개의 16비트 워드를 1개의 32비트 결합 데이터로 팩킹 후 리스트 재구성
+                            values = (
+                                list(raw_words[:15]) +    
+                                [dint_mwh] +              
+                                list(raw_words[17:])      
+                            )
+                            
+                            insert_raw_data(values)
+                            buffer = buffer[expected_len:] 
+                        else:
+                            buffer = buffer[1:]
                     else:
-                        # 알 수 없는 펑션코드 처리 방어선
                         buffer = buffer[1:]
-                        
-            time.sleep(0.01) # 무한루프로 인한 CPU 과부하 방지 점검용 미세 휴식
-            
-        except Exception as loop_err:
-            print(f"⚠️ [통신 엔진 백그라운드 에러] 루프 예외 발생: {loop_err}")
-            time.sleep(1) # 에러 폭주 방지용 지연
+            time.sleep(0.01)
+        except Exception as e:
+            print(f"시리얼 수신 스레드 예외 발생: {e}")
+            break
+
+def insert_raw_data(values):
+    if len(values) < len(DATA_LABELS): return
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        now = datetime.now()
+        l_date, l_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')
+        
+        DIV_BY_10 = {"실내온도", "외기온도", "SF운전시간", "EF운전시간", "Tr1_Temp", "Tr2_Temp", "Tr3_Temp"}
+        DIV_BY_100 = {"KEP_A_R", "KEP_A_S", "KEP_A_T", "KEP_frequency", "KEP_V_R", "KEP_V_S", "KEP_V_T", "KEP_V_R_S", "KEP_V_S_T", "KEP_V_T_R", "KEP_P_mWh"}
+        
+        adjusted_values = []
+        for label, val in zip(DATA_LABELS, values):
+            if label in DIV_BY_10: adjusted_values.append(val / 10.0)
+            elif label in DIV_BY_100: adjusted_values.append(val / 100.0)
+            else: adjusted_values.append(float(val))
+
+        placeholders = ", ".join(["%s"] * len(adjusted_values))
+        
+        col_names = ", ".join([f"`{name}`" for name in DATA_LABELS])
+        
+        query = f"INSERT INTO raw_data (log_date, log_time, {col_names}) VALUES (%s, %s, {placeholders})"
+        c.execute(query, [l_date, l_time] + adjusted_values)
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"DB 저장 오류: {e}")
+
+def verify_crc(data):
+    if len(data) < 4: return False
+    body = data[:-2]
+    recv_crc = data[-2:]
+    calc_crc = calculate_crc(body)
+    return recv_crc == calc_crc or recv_crc == calc_crc[::-1]
+
+def calculate_crc(data):
+    crc = 0xFFFF
+    for byte in data:
+        crc ^= byte
+        for _ in range(8):
+            if crc & 0x0001:
+                crc = (crc >> 1) ^ 0xA001
+            else:
+                crc >>= 1
+    return struct.pack('<H', crc)

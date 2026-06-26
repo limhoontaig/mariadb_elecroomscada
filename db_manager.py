@@ -1,26 +1,26 @@
 # db_manager.py
 import os
-import pymysql  # 💡 핵심 개선: 호환성이 가장 뛰어난 PyMySQL 채택
+import struct
 from datetime import datetime, timedelta
+import pymysql  # 💡 라이브러리 변경
+from sqlalchemy import create_engine
 
-# =========================================================================
-# [설정 및 전역 변수] 기본 경로 및 데이터 라벨 정의
-# =========================================================================
+# 💡 excel_report.py와의 호환성을 위해 기존 폴더 경로 정의를 다시 추가합니다.
 DB_DIR = os.path.join(os.environ['LOCALAPPDATA'], 'ElecRoomSCADA')
-if not os.path.exists(DB_DIR):
-    os.makedirs(DB_DIR)
 
-# MariaDB 접속 정보 설정 (PyMySQL 규격)
+# 💡 MariaDB 접속 정보 설정 (본인 환경에 맞게 수정)
 DB_CONFIG = {
     'host': 'localhost',
-    'user': 'root',        # 💡 새로 만든 계정으로 변경
+    'user': 'scada_user',        # 💡 새로 만든 계정으로 변경
     'password': 'scada1234',     # 💡 새로 설정한 비밀번호로 변경
     'database': 'elecroomscada',
     'port': 3306,
-    'charset': 'utf8mb4'
+    'autocommit': False
 }
 
-# 50개 워드 데이터 매핑용 한글 라벨 (순서 절대 변경 금지)
+# 💡 다른 파일(plc_worker, excel_report 등)과의 호환성을 위해 변수 유지
+DB_NAME = DB_CONFIG['database'] 
+
 DATA_LABELS = [
     "실내온도", "외기온도", "SF운전시간", "EF운전시간", 
     "KEP_V_R", "KEP_V_S", "KEP_V_T", "KEP_V_R_S", "KEP_V_S_T", "KEP_V_T_R", 
@@ -31,289 +31,226 @@ DATA_LABELS = [
     "Tr3_A_R", "Tr3_A_S", "Tr3_A_T", "Tr3_V_R", "Tr3_V_S", "Tr3_V_T", "Tr3_V_R_S", "Tr3_V_S_T", "Tr3_V_T_R", "Tr3_P_kW", "Tr3_Temp"
 ]
 
-# 수동 검침용 10개 필드 정의
-METER_FIELDS = [
-    "main_active", "main_reactive", 
-    "ind_mid", "ind_max", "ind_light", 
-    "street_mid", "street_max", "street_light", 
-    "geo_1", "geo_2", "geo_3"
-]
+COLUMN_LABELS = ["날짜", "시간/구분"] + DATA_LABELS
 
-# =========================================================================
-# [커넥션 빌더] 안전한 데이터베이스 연결 및 통로 개방
-# =========================================================================
+_db_url = f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
+_engine = create_engine(_db_url)
+
+def get_db_connection():
+    """[방법 A] 판다스(그래프) 전용 함수"""
+    # 🌟 pymysql.connect가 아니라, 미리 만든 SQLAlchemy '엔진' 객체를 리턴합니다!
+    # 이 객체를 pandas에 넘겨줘야 UserWarning 경고가 발생하지 않습니다.
+    return _engine
+
 def get_db_raw_connection():
-    """안전한 MariaDB Connection 객체를 반환합니다."""
-    try:
-        return pymysql.connect(**DB_CONFIG)
-    except Exception as err:
-        print(f"[DB 커넥션 오류] 연결 실패: {err}")
-        raise err
+    """기존의 순수한 pymysql connection 객체가 강제로 필요한 경우 사용하는 보조 함수"""
+    return pymysql.connect(
+        host=DB_CONFIG['host'],
+        user=DB_CONFIG['user'],
+        password=DB_CONFIG['password'],
+        database=DB_CONFIG['database'],
+        port=DB_CONFIG['port'],
+        autocommit=DB_CONFIG['autocommit']
+    )
 
-# =========================================================================
-# [초기화 로직] 프로그램 기동 시 테이블 자동 생성 (MariaDB 표준 문법)
-# =========================================================================
 def init_db():
-    """메인 진입(main.py) 시 호출되어 MariaDB 내부 필수 테이블들을 검사 및 생성합니다."""
     conn = get_db_raw_connection()
     c = conn.cursor()
+    cols = ", ".join([f'`{name}` REAL' for name in DATA_LABELS])
     
-    # 1. 실시간 수집 raw_data 테이블 생성
-    columns_str = ", ".join([f"`{name}` DOUBLE DEFAULT NULL" for name in DATA_LABELS])
-    c.execute(f'''
-        CREATE TABLE IF NOT EXISTS raw_data (
-            idx INT AUTO_INCREMENT PRIMARY KEY,
-            log_date VARCHAR(10) NOT NULL,
-            log_time VARCHAR(8) NOT NULL,
-            {columns_str},
-            INDEX idx_date_time (log_date, log_time)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
+    # 테이블 생성 (백틱 적용 및 VARCHAR 크기 명시)
+    c.execute(f'CREATE TABLE IF NOT EXISTS raw_data (log_date DATE, log_time TIME, {cols}, PRIMARY KEY (log_date, log_time))')
+    c.execute(f'CREATE TABLE IF NOT EXISTS hourly_avg (log_date DATE, log_time TIME, {cols}, PRIMARY KEY (log_date, log_time))')
+    c.execute(f'CREATE TABLE IF NOT EXISTS daily_extremes (log_date DATE, `extreme_type` VARCHAR(10), {cols}, PRIMARY KEY (log_date, `extreme_type`))')
+    
+    # MariaDB 인덱스 문법
+    try:
+        c.execute('CREATE INDEX idx_raw_data_date_time ON raw_data (log_date, log_time)')
+        c.execute('CREATE INDEX idx_hourly_avg_date_time ON hourly_avg (log_date, log_time)')
+    except Exception:
+        pass # 이미 인덱스가 존재할 경우 무시
 
-    # 2. 전력 분석용 최고/최저 통계 daily_extremes 테이블 생성
-    extremes_cols = ", ".join([f"`{name}` DOUBLE DEFAULT NULL" for name in DATA_LABELS])
-    c.execute(f'''
-        CREATE TABLE IF NOT EXISTS daily_extremes (
-            log_date VARCHAR(10) NOT NULL,
-            extreme_type VARCHAR(10) NOT NULL,
-            {extremes_cols},
-            PRIMARY KEY (log_date, extreme_type)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-
-    # 3. 수동 검침 데이터 manual_meter_logs 테이블 생성
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS manual_meter_logs (
-            log_date DATE PRIMARY KEY,
-            main_active REAL,
-            main_reactive REAL,
-            ind_mid REAL,
-            ind_max REAL,
-            ind_light REAL,
-            street_mid REAL,
-            street_max REAL,
-            street_light REAL,
-            geo_1 REAL,
-            geo_2 REAL,
-            geo_3 REAL
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-
-    # 4. 현장 점검 기록 field_inspection 테이블 생성
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS field_inspection (
-            inspection_date VARCHAR(10) NOT NULL,
-            inspection_round INT NOT NULL,
-            inspector_name VARCHAR(50) NOT NULL,
-            inspected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (inspection_date, inspection_round)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-
+    create_field_inspection_table()
     conn.commit()
     c.close()
     conn.close()
-    print("✅ [DB 초기화 완료] MariaDB 모든 시스템 테이블이 정상 준비되었습니다.")
 
-# =========================================================================
-# [C.R.U.D 비즈니스 함수 API] 외부 파일용 인터페이스
-# =========================================================================
+def calculate_hourly_avg():
+    try:
+        conn = get_db_raw_connection()
+        c = conn.cursor()
+        now = datetime.now()
+        last_hour = (now - timedelta(hours=1))
+        target_date = last_hour.strftime('%Y-%m-%d')
+        target_hour = last_hour.strftime('%H')
+        
+        avg_select = ", ".join([f'AVG(`{name}`)' for name in DATA_LABELS])
+        col_names = ", ".join([f'`{name}`' for name in DATA_LABELS])
+        
+        # 💡 SQLite의 ? -> %s 변경, LIKE 조건 수정
+        query = f"SELECT {avg_select} FROM raw_data WHERE log_date = %s AND log_time LIKE %s"
+        c.execute(query, (target_date, f"{target_hour}:%"))
+        result = c.fetchone()
 
-def save_plc_raw_data(log_date, log_time, adjusted_values):
+        if result and result[0] is not None:
+            rounded_result = [round(float(val), 1) if val is not None else 0.0 for val in result]
+            placeholders = ", ".join(["%s"] * len(DATA_LABELS))
+            # 💡 REPLACE INTO 사용
+            insert_query = f"REPLACE INTO hourly_avg (log_date, log_time, {col_names}) VALUES (%s, %s, {placeholders})"
+            
+            c.execute(insert_query, [target_date, f"{target_hour}:00:00"] + rounded_result)
+            conn.commit()
+    except Exception as e:
+        print(f"평균 계산 오류: {e}")
+    finally:
+        c.close()
+        conn.close()
+
+def calculate_daily_extremes(target_date):
+    try:
+        conn = get_db_raw_connection()
+        c = conn.cursor()
+        max_select = ", ".join([f'MAX(`{name}`)' for name in DATA_LABELS])
+        min_select = ", ".join([f'MIN(`{name}`)' for name in DATA_LABELS])
+        col_names = ", ".join([f'`{name}`' for name in DATA_LABELS])
+        placeholders = ", ".join(["%s"] * len(DATA_LABELS))
+        
+        query_max = f'SELECT {max_select} FROM raw_data WHERE log_date = %s'
+        c.execute(query_max, (target_date,))
+        max_res = c.fetchone()
+        if max_res and max_res[0] is not None:
+            insert_max = f'REPLACE INTO daily_extremes (log_date, `extreme_type`, {col_names}) VALUES (%s, %s, {placeholders})'
+            c.execute(insert_max, [target_date, 'MAX'] + list(max_res))
+            
+        query_min = f'SELECT {min_select} FROM raw_data WHERE log_date = %s'
+        c.execute(query_min, (target_date,))
+        min_res = c.fetchone()
+        if min_res and min_res[0] is not None:
+            insert_min = f'REPLACE INTO daily_extremes (log_date, `extreme_type`, {col_names}) VALUES (%s, %s, {placeholders})'
+            c.execute(insert_min, [target_date, 'MIN'] + list(min_res))
+            
+        conn.commit()
+    except Exception as e:
+        print(f"최고/최저 계산 오류: {e}")
+    finally:
+        c.close()
+        conn.close()
+
+METER_FIELDS = ["main_active", "main_reactive", "ind_mid", "ind_max", "ind_light", "street_mid", "street_max", "street_light", "geo_1", "geo_2", "geo_3"]
+
+def create_manual_meter_table():
     conn = get_db_raw_connection()
     c = conn.cursor()
-    try:
-        placeholders = ", ".join(["%s"] * len(adjusted_values))
-        col_names = ", ".join([f"`{name}`" for name in DATA_LABELS])
-        query = f"INSERT INTO raw_data (log_date, log_time, {col_names}) VALUES (%s, %s, {placeholders})"
-        
-        c.execute(query, [log_date, log_time] + adjusted_values)
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"[DB 오류] PLC 데이터 저장 실패: {e}")
-        return False
-    finally:
-        c.close()
-        conn.close()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS manual_meter_logs (
+            log_date DATE PRIMARY KEY,
+            main_active REAL, main_reactive REAL, ind_mid REAL, ind_max REAL, ind_light REAL,
+            street_mid REAL, street_max REAL, street_light REAL, geo_1 REAL, geo_2 REAL, geo_3 REAL
+        )
+    ''')
+    conn.commit()
+    c.close()
+    conn.close()
 
-def get_latest_realtime_data():
+def get_manual_meter_data(target_date):
+    create_manual_meter_table()
     conn = get_db_raw_connection()
-    c = conn.cursor(pymysql.cursors.DictCursor) # 💡 PyMySQL용 딕셔너리 변환 문법 보정
-    try:
-        c.execute("SELECT * FROM raw_data ORDER BY log_date DESC, log_time DESC LIMIT 1")
-        return c.fetchone()
-    finally:
-        c.close()
-        conn.close()
+    c = conn.cursor()
+    fields_str = ", ".join([f"`{f}`" for f in METER_FIELDS])
+    c.execute(f'SELECT {fields_str} FROM manual_meter_logs WHERE log_date = %s', (target_date,))
+    res = c.fetchone()
+    c.close()
+    conn.close()
+    
+    data_dict = {f: "" for f in METER_FIELDS}
+    if res:
+        for idx, field in enumerate(METER_FIELDS):
+            data_dict[field] = str(res[idx]) if res[idx] is not None else ""
+    return data_dict
+
+def save_manual_meter_data(target_date, data_dict):
+    create_manual_meter_table()
+    conn = get_db_raw_connection()
+    c = conn.cursor()
+    fields_str = "log_date, " + ", ".join([f"`{f}`" for f in METER_FIELDS])
+    placeholders = ", ".join(["%s"] * (len(METER_FIELDS) + 1))
+    
+    values = [target_date]
+    for field in METER_FIELDS:
+        val = data_dict.get(field, "")
+        values.append(float(val) if val.strip() != "" else None)
+        
+    c.execute(f'REPLACE INTO manual_meter_logs ({fields_str}) VALUES ({placeholders})', values)
+    conn.commit()
+    c.close()
+    conn.close()
+
+def get_manual_meter_log_for_table(target_date):
+    create_manual_meter_table()
+    conn = get_db_raw_connection()
+    c = conn.cursor()
+    fields_str = ", ".join([f"`{f}`" for f in METER_FIELDS])
+    c.execute(f"SELECT log_date, {fields_str} FROM manual_meter_logs WHERE log_date = %s", (target_date,))
+    row = c.fetchone()
+    c.close()
+    conn.close()
+    
+    if row:
+        return [str(row[0])] + [f"{v:.1f}" if isinstance(v, float) else str(v) if v is not None else "-" for v in row[1:]]
+    else:
+        return [target_date] + ["-"] * len(METER_FIELDS)
+
+def create_field_inspection_table():
+    conn = get_db_raw_connection()
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS field_inspection (
+            inspection_date DATE,
+            inspection_round INTEGER,
+            inspector_name VARCHAR(100) NOT NULL,
+            inspected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (inspection_date, inspection_round)
+        )
+    ''')
+    conn.commit()
+    c.close()
+    conn.close()
 
 def save_field_inspection(target_date, round_val, inspector_name):
+    create_field_inspection_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     try:
-        query = '''
-            INSERT INTO field_inspection (inspection_date, inspection_round, inspector_name, inspected_at)
+        # 💡 SQLite 전용 datetime('now', 'localtime') -> NOW() 변경
+        c.execute('''
+            REPLACE INTO field_inspection (inspection_date, inspection_round, inspector_name, inspected_at)
             VALUES (%s, %s, %s, NOW())
-            ON DUPLICATE KEY UPDATE inspector_name = VALUES(inspector_name), inspected_at = NOW()
-        '''
-        c.execute(query, (target_date, round_val, inspector_name))
+        ''', (target_date, round_val, inspector_name))
         conn.commit()
         return True
     except Exception as e:
-        print(f"[DB 오류] 현장 점검 기록 저장 실패: {e}")
+        print(f"현장 점검 저장 오류: {e}")
         return False
     finally:
         c.close()
         conn.close()
 
 def get_field_inspections_for_date(target_date):
+    create_field_inspection_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
-    data = {1: {"name": "", "time": ""}, 2: {"name": "", "time": ""}, 3: {"name": "", "time": ""}}
-    try:
-        c.execute('''
-            SELECT inspection_round, inspector_name, DATE_FORMAT(inspected_at, '%%H:%%M') 
-            FROM field_inspection 
-            WHERE inspection_date = %s
-        ''', (target_date,))
-        rows = c.fetchall()
-        for r in rows:
-            r_idx, name, t_str = r[0], r[1], r[2]
-            if r_idx in data:
-                data[r_idx] = {"name": name, "time": t_str}
-        return data
-    finally:
-        c.close()
-        conn.close()
-
-def create_manual_meter_table(): pass
-
-def get_realtime_grid_data(selected_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    try:
-        query = "SELECT log_date, log_time, " + ", ".join([f"`{name}`" for name in DATA_LABELS]) + " FROM raw_data WHERE log_date = %s ORDER BY log_time ASC"
-        c.execute(query, (selected_date,))
-        return c.fetchall()
-    finally:
-        c.close()
-        conn.close()
-
-def check_inspection_exists(target_date, round_idx):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    try:
-        c.execute('SELECT inspector_name FROM field_inspection WHERE inspection_date = %s AND inspection_round = %s', (target_date, round_idx))
-        return c.fetchone() is not None
-    finally:
-        c.close()
-        conn.close()
-
-def get_excel_extremes_data(selected_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    extremes_dict = {}
-    try:
-        c.execute('SELECT * FROM daily_extremes WHERE log_date = %s', (selected_date,))
-        rows = c.fetchall()
-        columns = [desc[0] for desc in c.description] if c.description else []
-        
-        if 'extreme_type' in columns:
-            type_idx = columns.index('extreme_type')
-            for r in rows:
-                ext_type = r[type_idx]
-                for col_name in DATA_LABELS:
-                    if col_name in columns:
-                        val = r[columns.index(col_name)]
-                        extremes_dict[(ext_type, col_name)] = round(float(val), 1) if val is not None else "-"
-        return extremes_dict
-    finally:
-        c.close()
-        conn.close()
-
-def get_excel_manual_meters(selected_date, prev_date, prev_month_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    meter_data = {"금일": {}, "전일": {}, "전월": {}}
-    fields_str = ", ".join(METER_FIELDS)
-    try:
-        for label, t_date in [("금일", selected_date), ("전일", prev_date), ("전월", prev_month_date)]:
-            c.execute(f'SELECT {fields_str} FROM manual_meter_logs WHERE log_date = %s', (t_date,))
-            res = c.fetchone()
-            if res:
-                meter_data[label] = {field: res[idx] for idx, field in enumerate(METER_FIELDS)}
-            else:
-                meter_data[label] = {field: None for field in METER_FIELDS}
-        return meter_data
-    finally:
-        c.close()
-        conn.close()
-
-def get_excel_hourly_averages(selected_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    hourly_data = {}
-    avg_selects = ", ".join([f'AVG(`{name}`)' for name in DATA_LABELS])
-    try:
-        # 💡 PyMySQL 안전 문법 적용을 위해 HOUR() 추출문 인라인 정렬
-        c.execute(f'''
-            SELECT HOUR(log_time) as hour, {avg_selects} 
-            FROM raw_data 
-            WHERE log_date = %s 
-            GROUP BY HOUR(log_time)
-        ''', (selected_date,))
-        rows = c.fetchall()
-        for r in rows:
-            hour = int(r[0]) if r[0] is not None else 0
-            for idx, label in enumerate(DATA_LABELS):
-                if r[idx + 1] is not None:
-                    hourly_data[(hour, label)] = round(float(r[idx + 1]), 1)
-        return hourly_data
-    finally:
-        c.close()
-        conn.close()
-
-def get_graph_data_by_date(target_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor(pymysql.cursors.DictCursor) # 💡 PyMySQL용 딕셔너리 리스트 추출 반환
-    try:
-        query = "SELECT log_time, " + ", ".join([f"`{name}`" for name in DATA_LABELS]) + " FROM raw_data WHERE log_date = %s ORDER BY log_time ASC"
-        c.execute(query, (target_date,))
-        return c.fetchall()
-    finally:
-        c.close()
-        conn.close()
-
-def get_manual_meter_by_date(target_date):
-    conn = get_db_raw_connection()
-    c = conn.cursor(pymysql.cursors.DictCursor)
-    try:
-        c.execute("SELECT * FROM manual_meter_logs WHERE log_date = %s", (target_date,))
-        return c.fetchone()
-    finally:
-        c.close()
-        conn.close()
-
-def save_manual_meter_logs(target_date, data_dict):
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    try:
-        fields = ["log_date"] + METER_FIELDS
-        placeholders = ", ".join(["%s"] * len(fields))
-        update_clause = ", ".join([f"`{f}` = VALUES(`{f}`)" for f in METER_FIELDS])
-        
-        query = f"""
-            INSERT INTO manual_meter_logs ({", ".join([f"`{f}`" for f in fields])})
-            VALUES ({placeholders})
-            ON DUPLICATE KEY UPDATE {update_clause}
-        """
-        values = [target_date] + [data_dict.get(f, 0.0) for f in METER_FIELDS]
-        c.execute(query, values)
-        conn.commit()
-        return True
-    except Exception as e:
-        print(f"[DB 오류] 수동 검침 데이터 저장 실패: {e}")
-        return False
-    finally:
-        c.close()
-        conn.close()
+    c.execute('''
+        SELECT inspection_round, inspector_name, DATE_FORMAT(inspected_at, '%%H:%%M') 
+        FROM field_inspection 
+        WHERE inspection_date = %s
+    ''', (target_date,))
+    rows = c.fetchall()
+    c.close()
+    conn.close()
+    
+    result = {1: {"name": "", "time": ""}, 2: {"name": "", "time": ""}, 3: {"name": "", "time": ""}}
+    for row in rows:
+        round_num, name, time_str = row
+        if round_num in result:
+            result[round_num] = {"name": name, "time": time_str}
+    return result

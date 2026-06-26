@@ -6,14 +6,16 @@ import zipfile
 import re
 from datetime import datetime, timedelta
 import openpyxl
-# 💡 핵심 개선: 이제 복잡한 내부 SQL 처리는 전부 db_manager가 대행합니다.
-import db_manager
+# db_manager에서 MariaDB 연결 함수 및 주요 상수를 가져옵니다.
+from db_manager import (DATA_LABELS, METER_FIELDS, DB_DIR, 
+                        create_manual_meter_table, get_field_inspections_for_date,
+                        get_db_raw_connection)
 
 TEMPLATE_NAME = "template_전기실_운영일지.xlsx"
-TEMPLATE_IN_APPDATA = os.path.join(db_manager.DB_DIR, TEMPLATE_NAME)
+TEMPLATE_IN_APPDATA = os.path.join(DB_DIR, TEMPLATE_NAME)
 
 def get_bundle_template_path(relative_path):
-    """PyInstaller 및 일반 개발 환경 경로 추적"""
+    """PyInstaller (.exe) 환경과 일반 파이썬 (.py) 환경을 모두 지원하는 경로 추적 함수"""
     try:
         base_path = sys._MEIPASS
         return os.path.join(base_path, relative_path)
@@ -22,27 +24,30 @@ def get_bundle_template_path(relative_path):
         return os.path.join(base_path, relative_path)
 
 def ensure_excel_template():
-    """템플릿 자동 무결성 점검"""
+    """앱데이터 폴더에 템플릿 파일이 없으면 자동으로 원본을 찾아서 복사해 둡니다."""
     if not os.path.exists(TEMPLATE_IN_APPDATA):
         bundled_template = get_bundle_template_path(TEMPLATE_NAME)
         if os.path.exists(bundled_template):
-            if not os.path.exists(db_manager.DB_DIR):
-                os.makedirs(db_manager.DB_DIR)
+            if not os.path.exists(DB_DIR):
+                os.makedirs(DB_DIR)
             shutil.copy(bundled_template, TEMPLATE_IN_APPDATA)
-            print("✅ 엑셀 템플릿 파일이 가상 공간에 준비되었습니다.")
+            print(f"✅ 엑셀 템플릿 파일이 앱데이터에 복구되었습니다.")
+        else:
+            print(f"❌ 원본 템플릿 파일({TEMPLATE_NAME})을 찾을 수 없습니다.")
 
-# 초기 구동 보장
+# 프로그램 시작 시점에 무조건 디버깅 체크 구동
 ensure_excel_template()
 
 def clean_external_links_physically(file_path):
-    """엑셀 내부 외부 링크 오염 파편 청소 엔진"""
+    """엑셀 내부의 외부 링크 파편들을 물리적으로 세척하는 함수"""
     temp_file_path = file_path + ".tmp"
     try:
         with zipfile.ZipFile(file_path, 'r') as zin:
             with zipfile.ZipFile(temp_file_path, 'w', zipfile.ZIP_DEFLATED) as zout:
                 for item in zin.infolist():
                     filename = item.filename
-                    if "externalLinks/" in filename: continue
+                    if "externalLinks/" in filename:
+                        continue
                     if filename == "xl/_rels/workbook.xml.rels":
                         data = zin.read(filename).decode('utf-8')
                         data_clean = re.sub(r'<Relationship[^>]*Type="[^"]*externalLink"[^>]*/>', '', data)
@@ -58,22 +63,23 @@ def clean_external_links_physically(file_path):
         os.rename(temp_file_path, file_path)
     except Exception as e:
         if os.path.exists(temp_file_path): os.remove(temp_file_path)
-        print(f"[경고] 외부 링크 세척 중 예외: {e}")
+        print(f"[경고] 외부 링크 물리 청소 중 예외 발생: {e}")
 
 def generate_excel_report(selected_date, target_dir=None):
     """
-    오직 엑셀 파일 복사 및 셀 덮어쓰기 서식 제어에만 집중하는 리모델링된 레포트 함수
+    구역별 복잡한 수식 데이터 치환 엔진 (MariaDB 연동 버전)
     """
+    template_file = TEMPLATE_IN_APPDATA
+
     if target_dir:
         output_file = os.path.join(target_dir, f"{selected_date}_전기실_운영일지.xlsx")
     else:  
-        output_file = os.path.join(db_manager.DB_DIR, f"{selected_date}_전기실_운영일지.xlsx")
+        output_file = os.path.join(DB_DIR, f"{selected_date}_전기실_운영일지.xlsx")
     
     if not os.path.exists(TEMPLATE_IN_APPDATA):
-        raise FileNotFoundError(f"템플릿 원본 파일이 부재합니다: {TEMPLATE_IN_APPDATA}")
+        raise FileNotFoundError(f"템플릿 파일 [{template_file}]이 경로에 존재하지 않습니다.")
     
-    # 1. 원본 서식 복제 및 문서 오픈
-    shutil.copy(TEMPLATE_IN_APPDATA, output_file)
+    shutil.copy(template_file, output_file)
     wb = openpyxl.load_workbook(output_file, data_only=False)
     
     if hasattr(wb, 'external_link_refs'): wb.external_link_refs = []
@@ -82,10 +88,8 @@ def generate_excel_report(selected_date, target_dir=None):
     dt = datetime.strptime(selected_date, "%Y-%m-%d")
     date_str_formatted = f"{dt.year}년 {dt.month:02d}월 {dt.day:02d}일"
     
-    # 시트 매핑 구조화
-    ws_summary = wb.worksheets[0]
-    ws_detail = wb.worksheets[1] if len(wb.worksheets) > 1 else wb.worksheets[0]
-    
+    ws_summary = None
+    ws_detail = None
     for sheet in wb.worksheets:
         if "운전현황" in sheet.title or "운영현황" in sheet.title:
             ws_summary = sheet
@@ -93,11 +97,30 @@ def generate_excel_report(selected_date, target_dir=None):
         elif "상세내역" in sheet.title:
             ws_detail = sheet
             sheet.title = f"{selected_date}_상세내역"
+            
+    if not ws_summary: ws_summary = wb.worksheets[0]
+    if not ws_detail: ws_detail = wb.worksheets[1] if len(wb.worksheets) > 1 else wb.worksheets[0]
+
+    # 🌟 [MariaDB 전환] db_manager의 연결 빌더 활용
+    conn = get_db_raw_connection()
+    c = conn.cursor()
 
     # =========================================================================
-    # [파트 1] 최고/최저 통계 데이터 매핑 (db_manager API 위임)
+    # [파트 1] 전력설비 운영 현황 분석 자료 - 최고/최저값 덮어쓰기 (상단 구역)
     # =========================================================================
-    extremes_dict = db_manager.get_excel_extremes_data(selected_date)
+    c.execute('SELECT * FROM daily_extremes WHERE log_date = %s', (selected_date,))
+    rows_extreme = c.fetchall()
+    
+    # MariaDB 커서 필드명 추출
+    columns_extreme = [desc[0] for desc in c.description] if c.description else []
+    
+    extremes_dict = {}
+    for r in rows_extreme:
+        ext_type = r[columns_extreme.index('extreme_type')]
+        for col_name in DATA_LABELS:
+            if col_name in columns_extreme:
+                val = r[columns_extreme.index(col_name)]
+                extremes_dict[(ext_type, col_name)] = round(float(val), 1) if val is not None else "-"
 
     for row in ws_summary.iter_rows(max_row=20):
         for cell in row:
@@ -113,32 +136,32 @@ def generate_excel_report(selected_date, target_dir=None):
                     cell.value = extremes_dict.get(("MIN", label), "-")
 
     # =========================================================================
-    # [파트 2 & 3] 요약 사용 전력량 수식 매핑
+    # [파트 2] 사용 전력량 현황 자동 데이터 치환 (21행 및 22행 영역)
     # =========================================================================
-    day_min_val = extremes_dict.get(("MIN", "KEP_P_kWh"), "-")
-    day_max_val = extremes_dict.get(("MAX", "KEP_P_kWh"), "-")
+    day_min_val = "-"
+    day_max_val = "-"
+    if "KEP_P_kWh" in columns_extreme:
+        day_min_val = extremes_dict.get(("MIN", "KEP_P_kWh"), "-")
+        day_max_val = extremes_dict.get(("MAX", "KEP_P_kWh"), "-")
     
-    # 당월 시작일 기준의 누적 검침량 산출 위임
+    if day_min_val == "-" or day_max_val == "-":
+        c.execute('SELECT MIN(KEP_P_kWh), MAX(KEP_P_kWh) FROM raw_data WHERE log_date = %s', (selected_date,))
+        res_raw = c.fetchone()
+        if res_raw:
+            if day_min_val == "-" and res_raw[0] is not None: day_min_val = round(float(res_raw[0]), 1)
+            if day_max_val == "-" and res_raw[1] is not None: day_max_val = round(float(res_raw[1]), 1)
+
     start_of_month = f"{dt.year}-{dt.month:02d}-01"
-    conn_raw = db_manager.get_db_raw_connection()
-    c_raw = conn_raw.cursor()
-    c_raw.execute('''
+    
+    # 💡 MariaDB 호환 쿼리 (날짜 비교 범위 표준화 및 파라미터 %s 바인딩)
+    c.execute('''
         SELECT KEP_P_kWh FROM raw_data 
         WHERE log_date >= %s AND log_date <= %s AND KEP_P_kWh IS NOT NULL 
         ORDER BY log_date ASC, log_time ASC LIMIT 1
     ''', (start_of_month, selected_date))
-    month_start_res = c_raw.fetchone()
+    month_start_res = c.fetchone()
     month_start_val = round(float(month_start_res[0]), 1) if month_start_res and month_start_res[0] is not None else "-"
-    
-    # 한전 적산 요약 연산 차이 구하기
-    try:
-        diff_mwh = round(float(day_max_val) - float(day_min_val), 1) if day_max_val != "-" and day_min_val != "-" else "-"
-    except:
-        diff_mwh = "-"
-    c_raw.close()
-    conn_raw.close()
 
-    # 21~22행 전력량 영역 가공
     for row_idx in [21, 22]:
         for cell in ws_summary[row_idx]:
             if cell.value and isinstance(cell.value, str):
@@ -152,57 +175,110 @@ def generate_excel_report(selected_date, target_dir=None):
                     elif 'end("KEP_P_kWh")' in text_clean: cell.value = day_max_val
                     elif 'E22-C22' in text_clean: cell.value = "=E22-C22"
 
-    # 26~30행 한전 요약 하드코딩 치환 구역 가공
+    # =========================================================================
+    # [파트 3] 한전 메인 적산 사용량 하단 요약 테이블 연동 구역 (26행 이하)
+    # =========================================================================
+    today_mwh = day_max_val if day_max_val != "-" else "-"
+    prev_mwh = day_min_val if day_min_val != "-" else "-"
+    try:
+        diff_mwh = round(float(today_mwh) - float(prev_mwh), 1) if today_mwh != "-" and prev_mwh != "-" else "-"
+    except:
+        diff_mwh = "-"
+
     for row in ws_summary.iter_rows(min_row=26, max_row=30):
         for cell in row:
             if cell.value and isinstance(cell.value, str):
                 val_strip = cell.value.strip()
-                if val_strip == "1469.79": cell.value = day_max_val
-                elif val_strip == "1464.06": cell.value = day_min_val
+                if val_strip == "1469.79": cell.value = today_mwh
+                elif val_strip == "1464.06": cell.value = prev_mwh
                 elif val_strip == "5.7300000000000182": cell.value = diff_mwh
 
     # =========================================================================
-    # [파트 4] 독립 수동 검침 연동 구역 (db_manager API 위임)
+    # [수동 검침] 수동 검침 데이터 연동 구역 (C27 ~ J35)
     # =========================================================================
-    prev_day = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
-    prev_month_last_day = (dt.replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d')
+    create_manual_meter_table()
     
-    meter_data = db_manager.get_excel_manual_meters(selected_date, prev_day, prev_month_last_day)
+    prev_day = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
+    first_day_of_current_month = dt.replace(day=1)
+    last_day_of_prev_month_dt = first_day_of_current_month - timedelta(days=1)
+    prev_month_last_day = last_day_of_prev_month_dt.strftime('%Y-%m-%d')
+    
+    meter_data = {"금일": {}, "전일": {}, "전월": {}}
+    
+    for label, target_d in [("금일", selected_date), ("전일", prev_day), ("전월", prev_month_last_day)]:
+        fields_str = ", ".join(METER_FIELDS)
+        # 💡 SQLite용 구문을 MariaDB 문법 파라미터(%s)로 수정
+        c.execute(f'SELECT {fields_str} FROM manual_meter_logs WHERE log_date = %s', (target_d,))
+        res = c.fetchone()
+        
+        if res:
+            meter_data[label] = {field: res[idx] for idx, field in enumerate(METER_FIELDS)}
+        else:
+            meter_data[label] = {field: None for field in METER_FIELDS}
 
     for row in ws_summary.iter_rows(min_row=27, max_row=35, min_col=3, max_col=10):
         for cell in row:
             if cell.value and isinstance(cell.value, str):
                 val_strip = cell.value.strip().replace(" ", "")
+                
                 match = re.match(r'(금일|전일|전월)\(["\']?([a-zA-Z0-9_]+)["\']?\)', val_strip)
                 if match:
-                    time_type, field_name = match.group(1), match.group(2)  
-                    if field_name in db_manager.METER_FIELDS:
-                        db_val = meter_data.get(time_type, {}).get(field_name, None)
+                    time_type = match.group(1)   
+                    field_name = match.group(2)  
+                    
+                    if field_name in METER_FIELDS:
+                        target_dict = meter_data.get(time_type, {})
+                        db_val = target_dict.get(field_name, None)
                         cell.value = float(db_val) if db_val is not None else ""
 
     # =========================================================================
-    # [파트 5] 현장 점검 정보 연동 구역 (db_manager API 위임)
+    # [파트 3-4] 현장 점검 데이터 자동 매핑 (E40:G48)
     # =========================================================================
-    inspection_data = db_manager.get_field_inspections_for_date(selected_date)
-    for row in ws_summary["E40:G48"]:
-        for cell in row:
-            if cell.value and isinstance(cell.value, str):
-                cell_text = cell.value.strip()
-                for round_idx, label in [(1, "1차"), (2, "2차"), (3, "3차")]:
-                    if label in cell_text and "점검자" in cell_text:
-                        cell.value = inspection_data[round_idx]["name"] if inspection_data[round_idx]["name"] else "-"
-                    elif label in cell_text and "시간" in cell_text:
-                        cell.value = inspection_data[round_idx]["time"] if inspection_data[round_idx]["time"] else "-"
+    try:
+        inspection_data = get_field_inspections_for_date(selected_date)
+        for row in ws_summary["E40:G48"]:
+            for cell in row:
+                if cell.value and isinstance(cell.value, str):
+                    cell_text = cell.value.strip()
+                    if "1차" in cell_text and "점검자" in cell_text:
+                        cell.value = inspection_data[1]["name"] if inspection_data[1]["name"] else "-"
+                    elif "1차" in cell_text and "시간" in cell_text:
+                        cell.value = inspection_data[1]["time"] if inspection_data[1]["time"] else "-"
+                    elif "2차" in cell_text and "점검자" in cell_text:
+                        cell.value = inspection_data[2]["name"] if inspection_data[2]["name"] else "-"
+                    elif "2차" in cell_text and "시간" in cell_text:
+                        cell.value = inspection_data[2]["time"] if inspection_data[2]["time"] else "-"
+                    elif "3차" in cell_text and "점검자" in cell_text:
+                        cell.value = inspection_data[3]["name"] if inspection_data[3]["name"] else "-"
+                    elif "3차" in cell_text and "시간" in cell_text:
+                        cell.value = inspection_data[3]["time"] if inspection_data[3]["time"] else "-"
+    except Exception as e:
+        print(f"[ERROR] 현장 점검 서식 매핑 중 오류 발생: {e}")
 
     # =========================================================================
-    # [파트 6] 상세내역 시트 - 24시간 시간별 데이터 주입 (db_manager API 위임)
+    # [파트 4] 상세내역 시트 - 24시간 시간별 데이터 주입 
     # =========================================================================
     for row in ws_detail.iter_rows(max_row=3):
         for cell in row:
             if cell.value and isinstance(cell.value, str) and "일자" in cell.value:
                 cell.value = f"일자 : {date_str_formatted}"
 
-    hourly_data = db_manager.get_excel_hourly_averages(selected_date)
+    # 💡 MariaDB용 시간 추출 문법(HOUR()) 및 통계 그룹 쿼리로 변경
+    avg_selects = ", ".join([f'AVG({name})' for name in DATA_LABELS])
+    c.execute(f'''
+        SELECT HOUR(log_time) as hour, {avg_selects} 
+        FROM raw_data 
+        WHERE log_date = %s 
+        GROUP BY HOUR(log_time)
+    ''', (selected_date,))
+    hourly_rows = c.fetchall()
+    
+    hourly_data = {}
+    for r in hourly_rows:
+        hour = int(r[0]) if r[0] is not None else 0
+        for idx, label in enumerate(DATA_LABELS):
+            if r[idx + 1] is not None:
+                hourly_data[(hour, label)] = round(float(r[idx + 1]), 1)
 
     for row_idx, row in enumerate(ws_detail.iter_rows(min_row=4, max_row=60), start=4):
         first_cell_val = str(row[0].value).strip() if row[0].value is not None else ""
@@ -211,7 +287,7 @@ def generate_excel_report(selected_date, target_dir=None):
             for col_idx, cell in enumerate(row):
                 if cell.value and isinstance(cell.value, str):
                     clean_label = cell.value.strip().replace('"', '')
-                    if clean_label in db_manager.DATA_LABELS:
+                    if clean_label in DATA_LABELS:
                         col_mapping[col_idx] = clean_label
             
             if col_mapping:
@@ -221,10 +297,13 @@ def generate_excel_report(selected_date, target_dir=None):
                     for col_idx, label in col_mapping.items():
                         val = hourly_data.get((h, label), "-")
                         ws_detail.cell(row=target_row, column=col_idx + 1).value = val
-            break
 
+    c.close()
+    conn.close()
     wb.save(output_file)
-    wb.close()
+    
     clean_external_links_physically(output_file)
-    print(f"✅ [엑셀 엔진] 일지 출력이 완벽하게 완료되었습니다. -> {output_file}")
-    return True
+    print(f"✅ [출력 성공] 구역별 매핑 완료: {output_file}")
+
+if __name__ == "__main__":
+    generate_excel_report("2026-06-23")
