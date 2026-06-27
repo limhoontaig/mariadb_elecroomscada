@@ -7,12 +7,37 @@ import re
 from datetime import datetime, timedelta
 import openpyxl
 # db_manager에서 MariaDB 연결 함수 및 주요 상수를 가져옵니다.
-from db_manager import (DATA_LABELS, METER_FIELDS, DB_DIR, 
+from db_manager import (DATA_LABELS, METER_FIELDS,  
                         create_manual_meter_table, get_field_inspections_for_date,
                         get_db_raw_connection)
 
+# 💡 [변경] DB_DIR 대신 실행 파일 위치를 기준으로 경로 설정
+# PyInstaller로 빌드 시 실행 파일이 있는 디렉토리를 가져옵니다.
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+
+# 템플릿과 데이터베이스 관련 경로를 모두 BASE_DIR 기준으로 고정
 TEMPLATE_NAME = "template_전기실_운영일지.xlsx"
+TEMPLATE_PATH = os.path.join(BASE_DIR, TEMPLATE_NAME)
+DB_DIR = BASE_DIR # 데이터 저장소도 실행 파일과 같은 위치
 TEMPLATE_IN_APPDATA = os.path.join(DB_DIR, TEMPLATE_NAME)
+
+def ensure_excel_template():
+    """템플릿 파일이 존재하는지 확인 (이미 실행 폴더에 있으므로 복사 로직 생략)"""
+    if not os.path.exists(TEMPLATE_PATH):
+        print(f"❌ 템플릿 파일을 찾을 수 없습니다: {TEMPLATE_PATH}")
+    else:
+        print(f"✅ 템플릿 파일을 찾았습니다: {TEMPLATE_PATH}")
+
+# 프로그램 시작 시점에 체크
+ensure_excel_template()
+
+
+
+
+
+
+# TEMPLATE_NAME = "template_전기실_운영일지.xlsx"
+# TEMPLATE_IN_APPDATA = os.path.join(DB_DIR, TEMPLATE_NAME)
 
 def get_bundle_template_path(relative_path):
     """PyInstaller (.exe) 환경과 일반 파이썬 (.py) 환경을 모두 지원하는 경로 추적 함수"""
@@ -23,7 +48,7 @@ def get_bundle_template_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(base_path, relative_path)
 
-def ensure_excel_template():
+'''def ensure_excel_template():
     """앱데이터 폴더에 템플릿 파일이 없으면 자동으로 원본을 찾아서 복사해 둡니다."""
     if not os.path.exists(TEMPLATE_IN_APPDATA):
         bundled_template = get_bundle_template_path(TEMPLATE_NAME)
@@ -36,7 +61,7 @@ def ensure_excel_template():
             print(f"❌ 원본 템플릿 파일({TEMPLATE_NAME})을 찾을 수 없습니다.")
 
 # 프로그램 시작 시점에 무조건 디버깅 체크 구동
-ensure_excel_template()
+ensure_excel_template() '''
 
 def clean_external_links_physically(file_path):
     """엑셀 내부의 외부 링크 파편들을 물리적으로 세척하는 함수"""

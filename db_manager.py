@@ -6,7 +6,7 @@ import pymysql  # 💡 라이브러리 변경
 from sqlalchemy import create_engine
 
 # 💡 excel_report.py와의 호환성을 위해 기존 폴더 경로 정의를 다시 추가합니다.
-DB_DIR = os.path.join(os.environ['LOCALAPPDATA'], 'ElecRoomSCADA')
+#DB_DIR = os.path.join(os.environ['LOCALAPPDATA'], 'ElecRoomSCADA')
 
 # 💡 MariaDB 접속 정보 설정 (본인 환경에 맞게 수정)
 DB_CONFIG = {
