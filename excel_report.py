@@ -32,13 +32,6 @@ def ensure_excel_template():
 ensure_excel_template()
 
 
-
-
-
-
-# TEMPLATE_NAME = "template_전기실_운영일지.xlsx"
-# TEMPLATE_IN_APPDATA = os.path.join(DB_DIR, TEMPLATE_NAME)
-
 def get_bundle_template_path(relative_path):
     """PyInstaller (.exe) 환경과 일반 파이썬 (.py) 환경을 모두 지원하는 경로 추적 함수"""
     try:
@@ -48,20 +41,6 @@ def get_bundle_template_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(base_path, relative_path)
 
-'''def ensure_excel_template():
-    """앱데이터 폴더에 템플릿 파일이 없으면 자동으로 원본을 찾아서 복사해 둡니다."""
-    if not os.path.exists(TEMPLATE_IN_APPDATA):
-        bundled_template = get_bundle_template_path(TEMPLATE_NAME)
-        if os.path.exists(bundled_template):
-            if not os.path.exists(DB_DIR):
-                os.makedirs(DB_DIR)
-            shutil.copy(bundled_template, TEMPLATE_IN_APPDATA)
-            print(f"✅ 엑셀 템플릿 파일이 앱데이터에 복구되었습니다.")
-        else:
-            print(f"❌ 원본 템플릿 파일({TEMPLATE_NAME})을 찾을 수 없습니다.")
-
-# 프로그램 시작 시점에 무조건 디버깅 체크 구동
-ensure_excel_template() '''
 
 def clean_external_links_physically(file_path):
     """엑셀 내부의 외부 링크 파편들을 물리적으로 세척하는 함수"""

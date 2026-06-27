@@ -4,7 +4,7 @@ import struct
 import time
 from datetime import datetime, timedelta
 
-from db_manager import DATA_LABELS, get_db_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
+from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
 
 COM_PORT = 'COM3'         
 BAUD_RATE = 19200         
@@ -80,7 +80,7 @@ def serial_receive_thread():
 def insert_raw_data(values):
     if len(values) < len(DATA_LABELS): return
     try:
-        conn = get_db_connection()
+        conn = get_db_raw_connection()
         c = conn.cursor()
         now = datetime.now()
         l_date, l_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')

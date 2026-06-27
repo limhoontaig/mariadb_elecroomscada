@@ -14,7 +14,7 @@ from PyQt5.QtGui import QPainter, QPageLayout
 from PyQt5.QtPrintSupport import QPrinter, QPrintPreviewDialog
 
 import db_manager
-from db_manager import get_db_connection # 💡 MariaDB 커넥션 함수 추가
+from db_manager import get_db_connection, get_db_raw_connection  # 💡 MariaDB 커넥션 함수 추가
 
 # 그래프 내부에 한글(맑은 고딕)과 마이너스 부호가 깨지는 것을 방지합니다.
 plt.rcParams['font.family'] = 'Malgun Gothic'
