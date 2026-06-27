@@ -68,49 +68,7 @@ class ManualMeterInputDialog(QDialog):
         
         # 그리드(계량기 양식)와의 사이 간격 조정
         main_layout.addSpacing(15)
-        '''
-        # 1. 날짜 선택 영역 (1라인 가로 배치 및 왼쪽 정렬 밀착)
-        date_layout = QHBoxLayout()
-        date_layout.setSpacing(10) # 위젯 간의 가로 간격을 촘촘하게 10px로 제한
-        
-        # 날짜 레이블 색상 변경 (안정적인 톤)
-        date_label = QLabel("<span style='color: #2c3e50;'><b>검침/기록 대상 일자:</b></span>")
-        date_layout.addWidget(date_label)
-        
-        self.date_edit = QDateEdit()
-        self.date_edit.setCalendarPopup(True) # 캘린더 팝업 허용 (언제든 변경 가능)
-        
-        # --- 날짜 로직 변경 분기 ---
-        if default_date_str:
-            # 부모 창에서 특정 날짜를 강제로 지정해 준 경우
-            target_date = QDate.fromString(default_date_str, "yyyy-MM-dd")
-        else:
-            # 기본값: 오늘 기준 전날(-1일) 세팅
-            target_date = QDate.currentDate().addDays(-1)
-            
-        self.date_edit.setDate(target_date)
-        
-        # [변경] 날짜 입력창이 뚱뚱해지지 않도록 너비를 딱 알맞게 고정
-        self.date_edit.setMinimumWidth(130)
-        self.date_edit.setMaximumWidth(150)
-        
-        # 날짜 변경 시 데이터를 새로 로드하는 이벤트 연결
-        self.date_edit.dateChanged.connect(self.load_date_data)
-        date_layout.addWidget(self.date_edit)
-        
-        # 근무자 혼돈 방지를 위한 안내 문구 (날짜창 바로 옆에 위치)
-        notice_label = QLabel("<span style='color: #e74c3c; font-size: 10pt;'>* 전날 전력량 입력을 위해 기본 '어제 날짜'로 지정되었습니다.</span>")
-        date_layout.addWidget(notice_label)
-        
-        # [핵심] 가로 레이아웃 우측에 스트레치를 넣어 모든 위젯을 왼쪽으로 콤팩트하게 밀착시킴
-        date_layout.addStretch(1)
-        
-        
-        # 메인 레이아웃에 날짜 라인 추가
-        main_layout.addLayout(date_layout)
-        # 날짜 라인과 하부 그리드(계량기 양식) 사이의 수직 간격을 촘촘하게 제어
-        main_layout.addSpacing(5)
-        '''
+       
         # 전체 그룹을 2x2로 배치할 메인 그리드 레이아웃
         grid_layout = QGridLayout()
         self.inputs = {}
