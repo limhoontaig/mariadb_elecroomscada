@@ -11,35 +11,35 @@ from db_manager import (DATA_LABELS, METER_FIELDS,
                         create_manual_meter_table, get_field_inspections_for_date,
                         get_db_raw_connection)
 
-# 💡 [변경] DB_DIR 대신 실행 파일 위치를 기준으로 경로 설정
-# PyInstaller로 빌드 시 실행 파일이 있는 디렉토리를 가져옵니다.
-BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 템플릿과 데이터베이스 관련 경로를 모두 BASE_DIR 기준으로 고정
 TEMPLATE_NAME = "template_전기실_운영일지.xlsx"
-TEMPLATE_PATH = os.path.join(BASE_DIR, TEMPLATE_NAME)
-DB_DIR = BASE_DIR # 데이터 저장소도 실행 파일과 같은 위치
-TEMPLATE_IN_APPDATA = os.path.join(DB_DIR, TEMPLATE_NAME)
+
+# 1. 실행 파일과 같은 위치 확인
+path1 = os.path.join(BASE_DIR, "_internal", TEMPLATE_NAME)
+# 2. _internal 폴더 내부 확인
+path2 = os.path.join(BASE_DIR, TEMPLATE_NAME)
+
+if os.path.exists(path1):
+    TEMPLATE_IN_APPDATA = path1
+elif os.path.exists(path2):
+    TEMPLATE_IN_APPDATA = path2
+else:
+    # 둘 다 없으면 기본값으로 path1을 지정하여 에러 메시지가 나오게 함
+    TEMPLATE_IN_APPDATA = path1
 
 def ensure_excel_template():
-    """템플릿 파일이 존재하는지 확인 (이미 실행 폴더에 있으므로 복사 로직 생략)"""
-    if not os.path.exists(TEMPLATE_PATH):
-        print(f"❌ 템플릿 파일을 찾을 수 없습니다: {TEMPLATE_PATH}")
+    if not os.path.exists(TEMPLATE_IN_APPDATA):
+        print(f"❌ 템플릿 파일을 찾을 수 없습니다: {TEMPLATE_IN_APPDATA}")
     else:
-        print(f"✅ 템플릿 파일을 찾았습니다: {TEMPLATE_PATH}")
+        print(f"✅ 템플릿 파일을 찾았습니다: {TEMPLATE_IN_APPDATA}")
 
 # 프로그램 시작 시점에 체크
 ensure_excel_template()
 
-
-def get_bundle_template_path(relative_path):
-    """PyInstaller (.exe) 환경과 일반 파이썬 (.py) 환경을 모두 지원하는 경로 추적 함수"""
-    try:
-        base_path = sys._MEIPASS
-        return os.path.join(base_path, relative_path)
-    except Exception:
-        base_path = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base_path, relative_path)
 
 
 def clean_external_links_physically(file_path):

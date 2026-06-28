@@ -11,9 +11,14 @@ Compression=lzma
 SolidCompression=yes
 
 [Files]
-; 어제 빌드한 dist/main 폴더 안의 모든 파일을 지정합니다.
-; Source 뒤에 경로를 어제 빌드했던 dist\main 폴더로 적어주세요.
-Source: "D:\mariadbelecroomscada\dist\main\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 1. 먼저 _internal 폴더의 모든 내용을 복사합니다.
+Source: "D:\mariadbelecroomscada\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+; 2. main.exe를 복사합니다.
+Source: "D:\mariadbelecroomscada\dist\main\main.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+; 3. 템플릿 파일만 별도로 지정하여 설치 폴더 루트({app})에 복사합니다.
+Source: "D:\mariadbelecroomscada\dist\main\_internal\template_전기실_운영일지.xlsx"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; 바탕화면에 아이콘 생성
