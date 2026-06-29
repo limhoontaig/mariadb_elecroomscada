@@ -3,7 +3,9 @@ import os
 import sqlite3
 import pymysql
 # 기존 db_manager에서 설정값들을 가져옵니다.
-from db_manager import DB_CONFIG, DB_DIR, DATA_LABELS, METER_FIELDS
+from db_manager import DB_CONFIG, DATA_LABELS, METER_FIELDS
+
+DB_DIR = os.path.join(os.environ['LOCALAPPDATA'], 'ElecRoomSCADA')
 
 # 1. 원본 SQLite3 파일 경로 지정
 SQLITE_PATH = os.path.join(DB_DIR, "plc_logging_real.db")
