@@ -12,19 +12,22 @@ SolidCompression=yes
 
 [Files]
 ; 1. 먼저 _internal 폴더의 모든 내용을 복사합니다.
-Source: "D:\mariadbelecroomscada\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "E:\mariadbelecroomscada\dist\main\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; 2. main.exe를 복사합니다.
-Source: "D:\mariadbelecroomscada\dist\main\main.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "E:\mariadbelecroomscada\dist\main\main.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; 3. 템플릿 파일만 별도로 지정하여 설치 폴더 루트({app})에 복사합니다.
-Source: "D:\mariadbelecroomscada\dist\main\_internal\template_전기실_운영일지.xlsx"; DestDir: "{app}"; Flags: ignoreversion
+Source: "E:\mariadbelecroomscada\dist\main\_internal\template_전기실_운영일지.xlsx"; DestDir: "{app}"; Flags: ignoreversion
+
+; 4. 아이콘 파일 (나중에 바로가기 생성 시 경로를 참조하기 위함)
+Source: "free-icon-folder-2015058.ico"; DestDir: "{app}"
 
 [Icons]
 ; 바탕화면에 아이콘 생성
-Name: "{autodesktop}\전기실SCADA"; Filename: "{app}\main.exe"; WorkingDir: "{app}"
+Name: "{autodesktop}\전기실SCADA"; Filename: "{app}\main.exe"; IconFilename: "{app}\free-icon-folder-2015058.ico"; WorkingDir: "{app}"
 ; 시작 메뉴에 바로가기 생성
-Name: "{group}\전기실SCADA"; Filename: "{app}\main.exe"
+Name: "{group}\전기실SCADA"; Filename: "{app}\main.exe"; IconFilename: "{app}\free-icon-folder-2015058.ico"
 
 [Run]
 ; 설치 완료 후 바로 실행

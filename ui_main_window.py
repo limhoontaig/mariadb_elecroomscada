@@ -7,6 +7,7 @@ from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGr
                              QLabel, QDateEdit, QPushButton, QStackedWidget, QSplitter, 
                              QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog)
 from PyQt5.QtCore import QTimer, QDate, Qt
+from PyQt5.QtGui import QIcon
 
 # 🌟 신규 분리한 그래프 매니저 임포트
 from ui_graph_manager import GraphManager
@@ -25,6 +26,8 @@ class SCADAWindow(QMainWindow):
         self.last_hour = datetime.now().hour
 
     def initUI(self):
+        icon_path = self.resource_path("free-icon-folder-2015058.ico")
+        self.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle("래미안개포루체하임아파트 변전실 데이터 통합 관리 시스템 (Developed by 관리과장 임훈택)")
         self.resize(1400, 900)
         
@@ -117,6 +120,14 @@ class SCADAWindow(QMainWindow):
         self.qdate.dateChanged.connect(self.auto_refresh)
 
         self.load_data()
+
+    def resource_path(self, relative_path):
+        import sys, os
+        try:
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+        return os.path.join(base_path, relative_path)
 
     def on_graph_tab_changed(self):
         """그래프 탭으로 전환될 때 즉시 그래프를 그리도록 지시하는 함수"""
