@@ -237,7 +237,7 @@ def get_field_inspections_for_date(target_date):
     conn = get_db_raw_connection()
     c = conn.cursor()
     c.execute('''
-        SELECT inspection_round, inspector_name, DATE_FORMAT(inspected_at, '%%H:%%M') 
+        SELECT inspection_round, inspector_name, DATE_FORMAT(inspected_at, '%%H:%%i') 
         FROM field_inspection 
         WHERE inspection_date = %s
     ''', (target_date,))

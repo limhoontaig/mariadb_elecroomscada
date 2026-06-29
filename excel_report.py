@@ -78,7 +78,7 @@ def generate_excel_report(selected_date, target_dir=None):
     if target_dir:
         output_file = os.path.join(target_dir, f"{selected_date}_전기실_운영일지.xlsx")
     else:  
-        output_file = os.path.join(DB_DIR, f"{selected_date}_전기실_운영일지.xlsx")
+        output_file = os.path.join(BASE_DIR, f"{selected_date}_전기실_운영일지.xlsx")
     
     if not os.path.exists(TEMPLATE_IN_APPDATA):
         raise FileNotFoundError(f"템플릿 파일 [{template_file}]이 경로에 존재하지 않습니다.")
@@ -248,6 +248,7 @@ def generate_excel_report(selected_date, target_dir=None):
                         cell.value = inspection_data[1]["name"] if inspection_data[1]["name"] else "-"
                     elif "1차" in cell_text and "시간" in cell_text:
                         cell.value = inspection_data[1]["time"] if inspection_data[1]["time"] else "-"
+                        print(f"time", inspection_data[1]["time"])
                     elif "2차" in cell_text and "점검자" in cell_text:
                         cell.value = inspection_data[2]["name"] if inspection_data[2]["name"] else "-"
                     elif "2차" in cell_text and "시간" in cell_text:
