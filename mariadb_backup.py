@@ -1,25 +1,26 @@
+# mariadb_backup.py
 import os
 import subprocess
-from datetime import datetime
 from db_manager import DB_CONFIG
 
-def backup_mariadb():
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_filename = f"{DB_CONFIG['database']}_{timestamp}.sql"
+def backup_mariadb(save_filepath):
+    """
+    사용자가 UI에서 선택한 save_filepath 경로에 MariaDB 데이터를 .sql 파일로 백업합니다.
+    반환값: (success_bool, message_or_path)
+    """
+    # 사용자가 대화창에서 선택한 파일의 절대 경로가 save_filepath로 전달됩니다.
+    backup_dir = os.path.dirname(save_filepath)
     
-    # 💡 다른 하드디스크(예: E드라이브)의 특정 폴더로 저장 경로 설정
-    # (원하시는 백업 하드디스크 경로로 수정하세요)
-    backup_dir = "E:\\db_backups" 
-    backup_filepath = os.path.join(backup_dir, backup_filename)
+    try:
+        os.makedirs(backup_dir, exist_ok=True)
+    except Exception as e:
+        return False, f"백업 폴더 생성 실패: {str(e)}"
     
-    os.makedirs(backup_dir, exist_ok=True)
-    
-    # 💡 [핵심] 본인 PC의 실제 MariaDB bin 폴더 내 mysqldump.exe 경로를 입력하세요.
-    # 경로에 공백이 있을 수 있으므로 파일 경로 전체를 정확히 적어줍니다.
+    # 본인 PC의 실제 MariaDB bin 폴더 내 mysqldump.exe 절대 경로
     mysqldump_path = r"C:\Program Files\MariaDB 12.3\bin\mysqldump.exe" 
     
     cmd = [
-        mysqldump_path,  # 💡 명령어 대신 절대 경로 사용
+        mysqldump_path,
         f"-h{DB_CONFIG['host']}",
         f"-P{DB_CONFIG['port']}",
         f"-u{DB_CONFIG['user']}",
@@ -28,13 +29,25 @@ def backup_mariadb():
     ]
     
     try:
-        with open(backup_filepath, "w", encoding="utf-8") as f:
-            subprocess.run(cmd, stdout=f, check=True)
-        print(f"✅ DB 백업 성공: {backup_filepath}")
-        return backup_filepath
+        # 파일 쓰기 모드로 실행하여 덤프 데이터 출력 저장
+        with open(save_filepath, "w", encoding="utf-8") as f:
+            result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True, check=True)
+            
+        print(f"[Backup Success] {save_filepath}")
+        return True, save_filepath
+        
     except subprocess.CalledProcessError as e:
-        print(f"❌ DB 백업 실패: {e}")
-        return None
+        if os.path.exists(save_filepath):
+            os.remove(save_filepath)
+        error_msg = e.stderr if e.stderr else "mysqldump 프로세스 실행 오류"
+        print(f"[Backup Error] {error_msg}")
+        return False, error_msg
+        
+    except Exception as e:
+        if os.path.exists(save_filepath):
+            os.remove(save_filepath)
+        print(f"[Backup Error] {str(e)}")
+        return False, str(e)
 
 if __name__ == "__main__":
     backup_mariadb()

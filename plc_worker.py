@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 
 from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
 
-COM_PORT = 'COM3'         
+COM_PORT = 'COM6'         
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
 NUM_WORDS = 50            

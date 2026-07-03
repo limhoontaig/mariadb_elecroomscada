@@ -14,6 +14,7 @@ from ui_graph_manager import GraphManager
 
 import db_manager
 import excel_report
+import mariadb_backup
 from ui_dialogs import ManualMeterInputDialog, FieldInspectionDialog 
 
 class SCADAWindow(QMainWindow):
@@ -60,6 +61,20 @@ class SCADAWindow(QMainWindow):
         self.btn_field_inspection = QPushButton("현장 점검 입력")
         self.btn_field_inspection.setStyleSheet("background-color: #E67E22; color: white; font-weight: bold; min-height: 35px;")
         self.btn_field_inspection.clicked.connect(self.click_open_inspection_popup) # # 👈 레이아웃에 추가 이벤트 연결
+        self.btn_backup_db = QPushButton("💾 DB 수동 백업")
+        self.btn_backup_db.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50; 
+                color: white; 
+                font-weight: bold; 
+                padding: 6px 12px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #34495e;
+            }
+        """)
+        self.btn_backup_db.clicked.connect(self.slot_backup_database)
         
         top_layout.addWidget(lbl_date_title)
         top_layout.addWidget(self.qdate)
@@ -68,6 +83,7 @@ class SCADAWindow(QMainWindow):
         top_layout.addWidget(self.btn_export_excel)
         top_layout.addWidget(self.btn_meter_input)
         top_layout.addWidget(self.btn_field_inspection)  # 👈 레이아웃에 추가  
+        top_layout.addWidget(self.btn_backup_db)
         main_layout.addWidget(top_ctrl)
 
         self.stack = QStackedWidget()
@@ -391,3 +407,40 @@ class SCADAWindow(QMainWindow):
                     self.load_data()
             else:
                 QMessageBox.critical(self, "저장 실패", "데이터베이스 저장 중 에러가 발생했습니다.")
+
+    def slot_backup_database(self):
+        """[수정] 메인 화면의 DB 백업 버튼을 눌렀을 때 실행되는 함수 (경로 선택 창 팝업)"""
+        
+        # 1. 기본적으로 제안할 파일명 생성 (예: elecroomscada_20260703_161500.sql)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"elecroomscada_{timestamp}.sql"
+        
+        # 2. 파일 저장 대화상자(디렉토리 및 파일명 선정) 팝업
+        # 사용자가 취소를 누르면 save_path는 빈 문자열("")이 됩니다.
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "DB 백업 파일 저장 위치 선택",
+            default_filename,
+            "SQL 파일 (*.sql);;모든 파일 (*.*)"
+        )
+        
+        # 사용자가 저장 창에서 '취소'를 누른 경우 리턴
+        if not save_path:
+            print("[INFO] DB 백업이 사용자에 의해 취소되었습니다.")
+            return
+            
+        # 3. 실제 백업 진행 (선택된 파일 경로를 인자로 넘겨줌)
+        success, message = mariadb_backup.backup_mariadb(save_path)
+        
+        if success:
+            QMessageBox.information(
+                self, 
+                "백업 완료", 
+                f"성공적으로 DB 데이터 내보내기가 완료되었습니다!\n\n저장 위치:\n{message}"
+            )
+        else:
+            QMessageBox.critical(
+                self, 
+                "백업 실패", 
+                f"DB 백업 중 오류가 발생했습니다.\n\nmysqldump 경로 설정이나 DB 권한을 확인하세요.\n\n에러 내용:\n{message}"
+            )

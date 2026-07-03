@@ -2,21 +2,18 @@
 import os
 import struct
 from datetime import datetime, timedelta
-import pymysql  # 💡 라이브러리 변경
+import pymysql
 from sqlalchemy import create_engine
 
-# 💡 MariaDB 접속 정보 설정 (본인 환경에 맞게 수정)
+# MariaDB 접속 정보 설정
 DB_CONFIG = {
     'host': 'localhost',
-    'user': 'scada_user',        # 💡 새로 만든 계정으로 변경
-    'password': 'scada1234',     # 💡 새로 설정한 비밀번호로 변경
+    'user': 'scada_user',
+    'password': 'scada1234',
     'database': 'elecroomscada',
     'port': 3306,
     'autocommit': False
 }
-
-# 💡 다른 파일(plc_worker, excel_report 등)과의 호환성을 위해 변수 유지
-#DB_NAME = DB_CONFIG['database'] 
 
 DATA_LABELS = [
     "실내온도", "외기온도", "SF운전시간", "EF운전시간", 
@@ -29,18 +26,17 @@ DATA_LABELS = [
 ]
 
 COLUMN_LABELS = ["날짜", "시간/구분"] + DATA_LABELS
+METER_FIELDS = ["main_active", "main_reactive", "ind_mid", "ind_max", "ind_light", "street_mid", "street_max", "street_light", "geo_1", "geo_2", "geo_3"]
 
 _db_url = f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}"
 _engine = create_engine(_db_url)
 
 def get_db_connection():
-    """[방법 A] 판다스(그래프) 전용 함수"""
-    # 🌟 pymysql.connect가 아니라, 미리 만든 SQLAlchemy '엔진' 객체를 리턴합니다!
-    # 이 객체를 pandas에 넘겨줘야 UserWarning 경고가 발생하지 않습니다.
+    """[방법 A] 판다스(그래프) 전용 함수 (SQLAlchemy Engine)"""
     return _engine
 
 def get_db_raw_connection():
-    """기존의 순수한 pymysql connection 객체가 강제로 필요한 경우 사용하는 보조 함수"""
+    """기존의 순수한 pymysql connection 객체 반환"""
     return pymysql.connect(
         host=DB_CONFIG['host'],
         user=DB_CONFIG['user'],
@@ -51,26 +47,51 @@ def get_db_raw_connection():
     )
 
 def init_db():
+    """프로그램 시작 시 단 한 번만 호출하여 모든 테이블 및 인덱스 초기화"""
     conn = get_db_raw_connection()
     c = conn.cursor()
+    
+    # 1. 원시 데이터 및 통계 테이블 생성용 컬럼 정의
     cols = ", ".join([f'`{name}` REAL' for name in DATA_LABELS])
     
-    # 테이블 생성 (백틱 적용 및 VARCHAR 크기 명시)
+    # 2. 전 테이블 생성 쿼리 집중 관리
     c.execute(f'CREATE TABLE IF NOT EXISTS raw_data (log_date DATE, log_time TIME, {cols}, PRIMARY KEY (log_date, log_time))')
     c.execute(f'CREATE TABLE IF NOT EXISTS hourly_avg (log_date DATE, log_time TIME, {cols}, PRIMARY KEY (log_date, log_time))')
     c.execute(f'CREATE TABLE IF NOT EXISTS daily_extremes (log_date DATE, `extreme_type` VARCHAR(10), {cols}, PRIMARY KEY (log_date, `extreme_type`))')
     
-    # MariaDB 인덱스 문법
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS manual_meter_logs (
+            log_date DATE PRIMARY KEY,
+            main_active REAL, main_reactive REAL, ind_mid REAL, ind_max REAL, ind_light REAL,
+            street_mid REAL, street_max REAL, street_light REAL, geo_1 REAL, geo_2 REAL, geo_3 REAL
+        )
+    ''')
+    
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS field_inspection (
+            inspection_date DATE,
+            inspection_round INTEGER,
+            inspector_name VARCHAR(100) NOT NULL,
+            inspected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (inspection_date, inspection_round)
+        )
+    ''')
+    
+    # 3. 인덱스 생성
     try:
         c.execute('CREATE INDEX idx_raw_data_date_time ON raw_data (log_date, log_time)')
+    except Exception:
+        pass
+        
+    try:
         c.execute('CREATE INDEX idx_hourly_avg_date_time ON hourly_avg (log_date, log_time)')
     except Exception:
-        pass # 이미 인덱스가 존재할 경우 무시
+        pass
 
-    create_field_inspection_table()
     conn.commit()
     c.close()
     conn.close()
+    print("💡 [DB Init] 모든 테이블 및 인덱스 검증/생성 완료.")
 
 def calculate_hourly_avg():
     try:
@@ -84,7 +105,6 @@ def calculate_hourly_avg():
         avg_select = ", ".join([f'AVG(`{name}`)' for name in DATA_LABELS])
         col_names = ", ".join([f'`{name}`' for name in DATA_LABELS])
         
-        # 💡 SQLite의 ? -> %s 변경, LIKE 조건 수정
         query = f"SELECT {avg_select} FROM raw_data WHERE log_date = %s AND log_time LIKE %s"
         c.execute(query, (target_date, f"{target_hour}:%"))
         result = c.fetchone()
@@ -92,7 +112,6 @@ def calculate_hourly_avg():
         if result and result[0] is not None:
             rounded_result = [round(float(val), 1) if val is not None else 0.0 for val in result]
             placeholders = ", ".join(["%s"] * len(DATA_LABELS))
-            # 💡 REPLACE INTO 사용
             insert_query = f"REPLACE INTO hourly_avg (log_date, log_time, {col_names}) VALUES (%s, %s, {placeholders})"
             
             c.execute(insert_query, [target_date, f"{target_hour}:00:00"] + rounded_result)
@@ -133,24 +152,7 @@ def calculate_daily_extremes(target_date):
         c.close()
         conn.close()
 
-METER_FIELDS = ["main_active", "main_reactive", "ind_mid", "ind_max", "ind_light", "street_mid", "street_max", "street_light", "geo_1", "geo_2", "geo_3"]
-
-def create_manual_meter_table():
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS manual_meter_logs (
-            log_date DATE PRIMARY KEY,
-            main_active REAL, main_reactive REAL, ind_mid REAL, ind_max REAL, ind_light REAL,
-            street_mid REAL, street_max REAL, street_light REAL, geo_1 REAL, geo_2 REAL, geo_3 REAL
-        )
-    ''')
-    conn.commit()
-    c.close()
-    conn.close()
-
 def get_manual_meter_data(target_date):
-    create_manual_meter_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     fields_str = ", ".join([f"`{f}`" for f in METER_FIELDS])
@@ -166,7 +168,6 @@ def get_manual_meter_data(target_date):
     return data_dict
 
 def save_manual_meter_data(target_date, data_dict):
-    create_manual_meter_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     fields_str = "log_date, " + ", ".join([f"`{f}`" for f in METER_FIELDS])
@@ -183,7 +184,6 @@ def save_manual_meter_data(target_date, data_dict):
     conn.close()
 
 def get_manual_meter_log_for_table(target_date):
-    create_manual_meter_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     fields_str = ", ".join([f"`{f}`" for f in METER_FIELDS])
@@ -197,28 +197,10 @@ def get_manual_meter_log_for_table(target_date):
     else:
         return [target_date] + ["-"] * len(METER_FIELDS)
 
-def create_field_inspection_table():
-    conn = get_db_raw_connection()
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS field_inspection (
-            inspection_date DATE,
-            inspection_round INTEGER,
-            inspector_name VARCHAR(100) NOT NULL,
-            inspected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (inspection_date, inspection_round)
-        )
-    ''')
-    conn.commit()
-    c.close()
-    conn.close()
-
 def save_field_inspection(target_date, round_val, inspector_name):
-    create_field_inspection_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     try:
-        # 💡 SQLite 전용 datetime('now', 'localtime') -> NOW() 변경
         c.execute('''
             REPLACE INTO field_inspection (inspection_date, inspection_round, inspector_name, inspected_at)
             VALUES (%s, %s, %s, NOW())
@@ -233,7 +215,6 @@ def save_field_inspection(target_date, round_val, inspector_name):
         conn.close()
 
 def get_field_inspections_for_date(target_date):
-    create_field_inspection_table()
     conn = get_db_raw_connection()
     c = conn.cursor()
     c.execute('''

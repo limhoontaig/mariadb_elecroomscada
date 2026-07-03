@@ -7,8 +7,7 @@ import re
 from datetime import datetime, timedelta
 import openpyxl
 # db_manager에서 MariaDB 연결 함수 및 주요 상수를 가져옵니다.
-from db_manager import (DATA_LABELS, METER_FIELDS,  
-                        create_manual_meter_table, get_field_inspections_for_date,
+from db_manager import (DATA_LABELS, METER_FIELDS, get_field_inspections_for_date,
                         get_db_raw_connection)
 
 if getattr(sys, 'frozen', False):
@@ -200,8 +199,7 @@ def generate_excel_report(selected_date, target_dir=None):
     # =========================================================================
     # [수동 검침] 수동 검침 데이터 연동 구역 (C27 ~ J35)
     # =========================================================================
-    create_manual_meter_table()
-    
+        
     prev_day = (dt - timedelta(days=1)).strftime('%Y-%m-%d')
     first_day_of_current_month = dt.replace(day=1)
     last_day_of_prev_month_dt = first_day_of_current_month - timedelta(days=1)
