@@ -4,6 +4,16 @@ import subprocess
 from datetime import datetime
 from db_manager import DB_CONFIG
 
+# config.ini 파일 읽기
+config = configparser.ConfigParser()
+config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+
+def get_backup_dir():
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        return config['SETTINGS'].get('BACKUP_DIR', r'D:\db_backups\yearly_regular')
+    return r'D:\db_backups\yearly_regular'
+
 def auto_backup_by_year():
     """
     [정기 백업] 연도별로 하나의 파일(예: elecroomscada_2026.sql)을 생성하여 
@@ -13,7 +23,7 @@ def auto_backup_by_year():
     backup_filename = f"{DB_CONFIG['database']}_{current_year}.sql"
     
     # 💡 정기 백업이 저장될 고정 폴더 설정 (원하는 경로로 수정 가능)
-    backup_dir = r"D:\db_backups\yearly_regular"
+    backup_dir = get_backup_dir()
     
     try:
         os.makedirs(backup_dir, exist_ok=True)

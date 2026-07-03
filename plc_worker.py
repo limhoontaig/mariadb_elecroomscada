@@ -2,11 +2,23 @@
 import serial
 import struct
 import time
+import configparser
+import os
 from datetime import datetime, timedelta
 
 from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
 
-COM_PORT = 'COM3'         
+config = configparser.ConfigParser()
+config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+
+def get_com_port():
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        return config['SETTINGS'].get('COM_PORT', 'COM3')
+    return 'COM3' # 기본값
+
+
+COM_PORT = get_com_port()
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
 NUM_WORDS = 50            
