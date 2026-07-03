@@ -21,10 +21,20 @@ class SCADAWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.initUI()
+
+        # 1. 기존 화면 리프레시 타이머 (10초 주기)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.auto_refresh)
         self.timer.start(10000) 
         self.last_hour = datetime.now().hour
+
+        # 2. 🌟 [신규] 정기 자동 백업 타이머 추가 (1시간 = 3600000 밀리초 주기)
+        self.backup_timer = QTimer(self)
+        self.backup_timer.timeout.connect(self.check_daily_backup)
+        self.backup_timer.start(3600000) # 1시간마다 체크
+        
+        # 마지막으로 자동 백업이 성공한 '날짜'를 기억 (하루에 한 번만 실행되도록 보호 장치)
+        self.last_backup_date = datetime.now().strftime("%Y-%m-%d")
 
     def initUI(self):
         icon_path = self.resource_path("free-icon-folder-2015058.ico")
@@ -136,6 +146,23 @@ class SCADAWindow(QMainWindow):
         self.qdate.dateChanged.connect(self.auto_refresh)
 
         self.load_data()
+
+    def check_daily_backup(self):
+        """백그라운드에서 매시간 돌며 자정이 지났는지 확인하고 연 단위 백업 파일 최신화"""
+        current_date_str = datetime.now().strftime("%Y-%m-%d")
+        current_hour = datetime.now().hour
+        
+        # 날짜가 바뀌었고, 새벽 시간대(0시~2시 사이)라면 자동 백업 수행
+        if current_date_str != self.last_backup_date and current_hour == 0:
+            print(f"[자동 정기 백업 시작] 현재 날짜: {current_date_str}")
+            
+            # mariadb_backup.py 에 새로 만든 연 단위 백업 함수 실행
+            success = mariadb_backup.auto_backup_by_year()
+            
+            if success:
+                self.last_backup_date = current_date_str
+                # 메인 화면 하단 상태바가 있다면 기록해 줍니다.
+                self.statusBar().showMessage(f"✅ 정기 자동 백업 완료 ({current_date_str} 자정 기준)", 10000)
 
     def resource_path(self, relative_path):
         import sys, os
@@ -414,8 +441,18 @@ class SCADAWindow(QMainWindow):
         # 1. 기본적으로 제안할 파일명 생성 (예: elecroomscada_20260703_161500.sql)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         default_filename = f"elecroomscada_{timestamp}.sql"
+
+        # 2. 💡 기본 시작 위치를 D:\db_backups 로 지정해두면 훨씬 편합니다.
+        default_start_path = os.path.join(r"D:\db_backups", default_filename)
         
-        # 2. 파일 저장 대화상자(디렉토리 및 파일명 선정) 팝업
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "DB 백업 파일 저장 위치 선택",
+            default_start_path,  # 💡 여기에 반영
+            "SQL 파일 (*.sql);;모든 파일 (*.*)"
+        )
+        
+        # 3. 파일 저장 대화상자(디렉토리 및 파일명 선정) 팝업
         # 사용자가 취소를 누르면 save_path는 빈 문자열("")이 됩니다.
         save_path, _ = QFileDialog.getSaveFileName(
             self,
