@@ -56,6 +56,15 @@ class SCADAWindow(QMainWindow):
         self.qdate.setMinimumWidth(120) 
         self.qdate.setAlignment(Qt.AlignCenter) 
         self.qdate.setStyleSheet("font-size: 14px; padding: 3px; font-weight: bold;") 
+
+        # 🌟 [신규 추가] 날짜 선택 범위 제한 기능 적용
+        # 1. DB 시작 날짜 설정 (2026년 5월 26일)
+        min_db_date = QDate(2026, 5, 26)
+        self.qdate.setMinimumDate(min_db_date)
+        
+        # 2. 오늘 날짜를 최대 선택 가능 날짜로 고정
+        max_db_date = QDate.currentDate()
+        self.qdate.setMaximumDate(max_db_date)
         
         lbl_date_title = QLabel("<b>선택 날짜:</b>")
         lbl_date_title.setStyleSheet("font-size: 14px; font-weight: bold;")
