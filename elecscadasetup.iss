@@ -23,6 +23,9 @@ Source: "E:\mariadbelecroomscada\dist\main\_internal\template_전기실_운영�
 ; 4. 아이콘 파일 (나중에 바로가기 생성 시 경로를 참조하기 위함)
 Source: "free-icon-folder-2015058.ico"; DestDir: "{app}"
 
+; 5. config.ini 파일만 별도로 지정하여 설치 폴더 루트({app})에 복사합니다.
+Source: "E:\mariadbelecroomscada\dist\main\_internal\config.ini"; DestDir: "{app}"; Flags: ignoreversion
+
 [Icons]
 ; 바탕화면에 아이콘 생성
 Name: "{autodesktop}\전기실SCADA"; Filename: "{app}\main.exe"; IconFilename: "{app}\free-icon-folder-2015058.ico"; WorkingDir: "{app}"

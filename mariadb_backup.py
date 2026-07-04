@@ -1,6 +1,7 @@
 # mariadb_backup.py 에 아래 함수를 추가하거나 교체합니다.
 import os
 import subprocess
+import configparser
 from datetime import datetime
 from db_manager import DB_CONFIG
 
