@@ -24,6 +24,7 @@ MY_SLAVE_ID = 5
 NUM_WORDS = 50            
 
 def serial_receive_thread():
+    time.sleep(3)
     try:
         ser = serial.Serial(port=COM_PORT, baudrate=BAUD_RATE, timeout=0.1)
         print(f"통신 엔진 가동 완료: {COM_PORT} @ {BAUD_RATE}")
