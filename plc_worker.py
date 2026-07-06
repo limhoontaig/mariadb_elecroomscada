@@ -83,51 +83,52 @@ def serial_receive_thread():
                         else:
                             buffer = buffer[1:]
 
-                    elif func_code == 0x03:
+                    # --------------------------------------------------
+                    # 2. FC 0x03 또는 FC 0x04 (읽기/하트비트) 처리
+                    # --------------------------------------------------
+                    elif func_code in (0x03, 0x04): # 💡 수정 1: 0x04 요청 허용
                         expected_len = 8 
                         
                         if len(buffer) < expected_len:
                             break
                         
                         packet = buffer[:expected_len]
+                        # print(f"\n[Rx] 읽기 요청 수신: {packet.hex().upper()}")
                         
                         if verify_crc(packet):
-                            # 1. 요청 정보 추출
                             start_addr = struct.unpack('>H', packet[2:4])[0]
                             num_words = struct.unpack('>H', packet[4:6])[0]
                             
-                            # 2. 응답 데이터 생성 (하트비트 로직 적용)
                             reply_data = []
-                            HEARTBEAT_ADDR = 0 # PLC와 약속한 임의의 번지
+                            HEARTBEAT_ADDR = 0 # 💡 수정 2: PLC가 요청하는 0번지로 세팅
                             
                             for i in range(num_words):
                                 current_addr = start_addr + i
-                                
                                 if current_addr == HEARTBEAT_ADDR:
-                                    # 요청한 주소가 하트비트 번지라면 1을 응답 (PC 살아있음!)
                                     reply_data.append(1)
                                 else:
-                                    # 그 외 주소는 기본값 0 (또는 다른 데이터) 응답
                                     reply_data.append(0)
                             
-                            # 3. 응답 패킷 조립
                             byte_count = num_words * 2
-                            reply_header = struct.pack('>BBB', MY_SLAVE_ID, 0x03, byte_count)
+                            reply_header = struct.pack('>BBB', MY_SLAVE_ID, func_code, byte_count)
                             reply_body = struct.pack(f'>{num_words}H', *reply_data)
                             
                             reply_without_crc = reply_header + reply_body
                             crc_bytes = calculate_crc(reply_without_crc)
                             final_reply = reply_without_crc + crc_bytes
                             
-                            # 4. 시리얼 포트로 송신 (안정성을 위한 미세 딜레이)
+                            # print(f" ┗ [Tx] 응답 송신: {final_reply.hex().upper()}\n")
+                            
                             time.sleep(0.01) 
                             ser.write(final_reply)
                             
                             buffer = buffer[expected_len:]
                         else:
+                            # print(f"❌ [에러] CRC 검증 실패: {packet.hex().upper()}")
                             buffer = buffer[1:]
                     else:
                         buffer = buffer[1:]
+
                 time.sleep(0.01)
         except Exception as e:
             print(f"시리얼 수신 스레드 예외 발생: {e}")
