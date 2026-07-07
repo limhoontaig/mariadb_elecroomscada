@@ -287,6 +287,7 @@ class SCADAWindow(QMainWindow):
             )
         
     def auto_refresh(self):
+        self.qdate.setMaximumDate(QDate.currentDate())
         curr_hour = datetime.now().hour
         if curr_hour != self.last_hour:
             self.last_hour = curr_hour
