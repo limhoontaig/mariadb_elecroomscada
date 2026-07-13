@@ -303,6 +303,21 @@ def generate_excel_report(selected_date, target_dir=None):
 
     c.close()
     conn.close()
+
+    # =========================================================================
+    # [추가] 각 시트 맨 아래에 출력시간(출력일시) 삽입
+    # =========================================================================
+    current_time_str = datetime.now().strftime("출력일시: %Y년 %m월 %d일 %H:%M")
+    
+    for sheet in wb.worksheets:
+        # 해당 시트의 데이터가 있는 마지막 행(max_row) 번호 찾기
+        last_row = sheet.max_row
+        
+        # 마지막 행에서 2칸 아래(여백 확보)의 A열(column=1)에 텍스트 입력
+        # 보고서 양식에 따라 우측 하단에 넣으려면 column 번호를 변경하세요 (예: E열은 column=5)
+        sheet.cell(row=last_row + 2, column=1).value = current_time_str
+    # =========================================================================
+
     wb.save(output_file)
     
     clean_external_links_physically(output_file)

@@ -462,15 +462,6 @@ class SCADAWindow(QMainWindow):
             "SQL 파일 (*.sql);;모든 파일 (*.*)"
         )
         
-        # 3. 파일 저장 대화상자(디렉토리 및 파일명 선정) 팝업
-        # 사용자가 취소를 누르면 save_path는 빈 문자열("")이 됩니다.
-        save_path, _ = QFileDialog.getSaveFileName(
-            self,
-            "DB 백업 파일 저장 위치 선택",
-            default_filename,
-            "SQL 파일 (*.sql);;모든 파일 (*.*)"
-        )
-        
         # 사용자가 저장 창에서 '취소'를 누른 경우 리턴
         if not save_path:
             print("[INFO] DB 백업이 사용자에 의해 취소되었습니다.")
