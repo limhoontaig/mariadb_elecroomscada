@@ -139,6 +139,18 @@ class SCADAWindow(QMainWindow):
         splitter.addWidget(QLabel("● 독립 계량장치 일일 지침 수동 로그 (manual_meter_logs)"))
         splitter.addWidget(self.manual_table)
 
+        # 👇👇👇 [여기에 신규 추가] 현장점검 테이블 위젯 설정 및 스플리터 추가 👇👇👇
+        self.inspection_table = QTableWidget()
+        self.inspection_table.setColumnCount(3)
+        self.inspection_table.setHorizontalHeaderLabels(["점검 차수", "점검자 성명", "점검 시간"])
+        
+        # 테이블 너비 비율 조정 (선택 사항)
+        # self.inspection_table.horizontalHeader().setStretchLastSection(True)
+
+        splitter.addWidget(QLabel("● 일일 현장점검 결과 로그"))
+        splitter.addWidget(self.inspection_table)
+        # 👆👆👆 [추가 끝] 👆👆👆
+
         table_layout.addWidget(splitter)
         self.stack.addWidget(self.page_table)
 
@@ -215,6 +227,10 @@ class SCADAWindow(QMainWindow):
             if hasattr(db_manager, 'get_manual_meter_log_for_table'):
                 manual_row = db_manager.get_manual_meter_log_for_table(selected_date)
                 self.display_manual_table([manual_row])
+
+            if hasattr(db_manager, 'get_field_inspections_for_date'):
+                inspection_data = db_manager.get_field_inspections_for_date(selected_date)
+                self.display_inspection_table(inspection_data)
 
         except Exception as e:
             print(f"UI 로딩 실패: {e}")
@@ -444,6 +460,37 @@ class SCADAWindow(QMainWindow):
                     self.load_data()
             else:
                 QMessageBox.critical(self, "저장 실패", "데이터베이스 저장 중 에러가 발생했습니다.")
+
+    # 👇👇👇 [신규 함수 추가] 현장점검 데이터를 테이블에 출력하는 함수 👇👇👇
+    def display_inspection_table(self, data_dict):
+        """1차~3차 현장점검 데이터를 테이블에 표시합니다."""
+        self.inspection_table.setRowCount(3) # 항상 1차, 2차, 3차로 고정된 3줄 생성
+        
+        for i, round_num in enumerate([1, 2, 3]):
+            # 딕셔너리에서 해당 차수의 데이터를 가져오고, 없거나 비어있으면 "-" 처리
+            info = data_dict.get(round_num, {"name": "", "time": ""})
+            name_str = info["name"] if info["name"] else "-"
+            time_str = info["time"] if info["time"] else "-"
+            
+            # 1. 점검 차수 아이템
+            item_round = QTableWidgetItem(f"{round_num}차 점검")
+            item_round.setTextAlignment(Qt.AlignCenter)
+            item_round.setFlags(item_round.flags() & ~Qt.ItemIsEditable) # 읽기 전용
+            
+            # 2. 점검자 성명 아이템
+            item_name = QTableWidgetItem(name_str)
+            item_name.setTextAlignment(Qt.AlignCenter)
+            if name_str != "-":
+                item_name.setForeground(Qt.darkBlue) # 입력된 데이터는 파란색으로 강조
+            
+            # 3. 점검 시간 아이템
+            item_time = QTableWidgetItem(time_str)
+            item_time.setTextAlignment(Qt.AlignCenter)
+            
+            # 테이블의 각 셀에 아이템 삽입
+            self.inspection_table.setItem(i, 0, item_round)
+            self.inspection_table.setItem(i, 1, item_name)
+            self.inspection_table.setItem(i, 2, item_time)
 
     def slot_backup_database(self):
         """[수정] 메인 화면의 DB 백업 버튼을 눌렀을 때 실행되는 함수 (경로 선택 창 팝업)"""

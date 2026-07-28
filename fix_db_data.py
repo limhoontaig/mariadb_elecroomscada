@@ -4,7 +4,7 @@ import db_manager
 def fix_database_errors():
     target_date = "2026-07-10"
     target_hour = "21"
-    error_times = ["21:48:45", "21:48:46"]
+    error_times = ["21:28:45", "21:28:46"]
 
     # 1. DB 연결
     conn = db_manager.get_db_raw_connection()
