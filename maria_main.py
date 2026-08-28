@@ -5,6 +5,8 @@ import time
 from PyQt5.QtWidgets import QApplication, QSplashScreen, QDesktopWidget
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal
 from PyQt5.QtGui import QCursor, QFont
+from PyQt5.QtWidgets import QApplication, QSplashScreen, QDesktopWidget, QMessageBox
+from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QSharedMemory
 
 # 최상위 관리 모듈 로드 (윈도우 로드는 지연 가능하도록 아래에서 하거나 그대로 둠)
 import db_manager
@@ -41,6 +43,16 @@ class InitWorker(QThread):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # ⭐ [신규] 프로그램 중복 실행 방지
+    shared_memory = QSharedMemory("LS_PLC_SCADA_Shared_Memory")
+    if not shared_memory.create(1):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("실행 경고")
+        msg.setText("이미 프로그램이 실행중에 있습니다. 필요시 실행되고 있는 프로그램을 중지하고 다시 실행하여 주시기 바랍니다.")
+        msg.exec_()
+        sys.exit(0)
     
     # 1. Splash Screen 즉시 생성 및 표시 (메인 스레드 가볍게 유지)
     splash = QSplashScreen()

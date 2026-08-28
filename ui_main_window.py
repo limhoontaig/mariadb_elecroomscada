@@ -68,6 +68,17 @@ class SCADAWindow(QMainWindow):
         
         lbl_date_title = QLabel("<b>선택 날짜:</b>")
         lbl_date_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+
+        # ⭐ [신규] RS485 통신 상태 라벨 생성
+        self.lbl_rs485_status = QLabel("⚫ 통신 확인 중...")
+        self.lbl_rs485_status.setAlignment(Qt.AlignCenter)
+        self.lbl_rs485_status.setStyleSheet("""
+            background-color: #7f8c8d; 
+            color: white; 
+            font-weight: bold; 
+            padding: 6px 12px;
+            border-radius: 4px;
+        """)
         
         self.btn_show_table = QPushButton("종합 데이터 표")
         self.btn_show_table.setStyleSheet("background-color: #2980b9; color: white; font-weight: bold; min-height: 35px;")
@@ -97,6 +108,7 @@ class SCADAWindow(QMainWindow):
         
         top_layout.addWidget(lbl_date_title)
         top_layout.addWidget(self.qdate)
+        top_layout.addWidget(self.lbl_rs485_status)
         top_layout.addWidget(self.btn_show_table)
         top_layout.addWidget(self.btn_show_graph)
         top_layout.addWidget(self.btn_export_excel)
