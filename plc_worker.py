@@ -5,6 +5,7 @@ import time
 import configparser
 import os
 from datetime import datetime, timedelta
+from PyQt5.QtCore import QObject, pyqtSignal
 
 from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
 
@@ -21,7 +22,15 @@ def get_com_port():
 COM_PORT = get_com_port()
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
-NUM_WORDS = 50            
+NUM_WORDS = 50   
+
+# 1. 시그널을 담을 전역 클래스 생성
+class CommSignal(QObject):
+    # bool 타입(True/False)을 전달하는 시그널 정의
+    status_changed = pyqtSignal(bool)
+
+# 다른 파일에서 접근할 수 있도록 인스턴스 생성
+comm_signal = CommSignal()
 
 def serial_receive_thread():
     time.sleep(3)
@@ -30,11 +39,21 @@ def serial_receive_thread():
         print(f"통신 엔진 가동 완료: {COM_PORT} @ {BAUD_RATE}")
     except Exception as e:
         print(f"시리얼 포트 개방 실패: {e}")
+        # ⭐ [추가] 포트 자체가 안 열리면 바로 빨간불(단절) 신호 송출
+        comm_signal.status_changed.emit(False)
         return
 
     buffer = b""
+    buffer = b""
+    # ⭐ [추가] 마지막으로 통신에 성공한 시간을 기록하는 변수
+    last_success_time = time.time()
+
     while True:
         try:
+            # ⭐ [추가] 5초 이상 아무런 데이터가 들어오지 않으면 (PLC가 꺼졌거나 선이 빠짐) 빨간불 송출
+            if time.time() - last_success_time > 5.0:
+                comm_signal.status_changed.emit(False)
+
             if ser.in_waiting > 0:
                 buffer += ser.read(ser.in_waiting)
                 
@@ -81,6 +100,11 @@ def serial_receive_thread():
                             
                             insert_raw_data(values)
                             buffer = buffer[expected_len:] 
+
+                            # ⭐ [추가] 데이터 수신 및 처리가 완벽히 성공했으므로 초록불(정상) 송출 및 시간 갱신
+                            comm_signal.status_changed.emit(True)
+                            last_success_time = time.time()
+
                         else:
                             buffer = buffer[1:]
 
@@ -124,6 +148,11 @@ def serial_receive_thread():
                             ser.write(final_reply)
                             
                             buffer = buffer[expected_len:]
+
+                            # ⭐ [추가] 응답(하트비트) 처리가 완벽히 성공했으므로 초록불(정상) 송출 및 시간 갱신
+                            comm_signal.status_changed.emit(True)
+                            last_success_time = time.time()
+
                         else:
                             # print(f"❌ [에러] CRC 검증 실패: {packet.hex().upper()}")
                             buffer = buffer[1:]
@@ -133,6 +162,12 @@ def serial_receive_thread():
                 time.sleep(0.01)
         except Exception as e:
             print(f"시리얼 수신 스레드 예외 발생: {e}")
+            # ⭐ [수정] 프로그램 종료 시 메모리 파괴로 인한 RuntimeError 방지
+            try:
+                comm_signal.status_changed.emit(False)
+            except RuntimeError:
+                pass # 이미 프로그램이 종료되어 객체가 삭제된 경우 조용히 무시합니다.
+            
             break
 
 def insert_raw_data(values):

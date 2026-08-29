@@ -8,6 +8,9 @@ from PyQt5.QtGui import QCursor, QFont
 from PyQt5.QtWidgets import QApplication, QSplashScreen, QDesktopWidget, QMessageBox
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QSharedMemory
 
+from PyQt5.QtWidgets import QMessageBox
+from PyQt5.QtCore import QSharedMemory
+
 # 최상위 관리 모듈 로드 (윈도우 로드는 지연 가능하도록 아래에서 하거나 그대로 둠)
 import db_manager
 import plc_worker
@@ -102,6 +105,12 @@ if __name__ == "__main__":
         # DB 작업이 끝난 평온한 상태에서 메인 창 생성
         win = SCADAWindow()
         center_window(win)
+
+        # =================================================================
+        # ⭐ [누락된 부분 추가] plc_worker의 시그널을 화면의 상태 변경 함수와 연결합니다!
+        import plc_worker
+        plc_worker.comm_signal.status_changed.connect(win.update_rs485_status)
+        # =================================================================
         
         # 최상단 고정으로 메인 화면 표시
         win.setWindowFlags(win.windowFlags() | Qt.WindowStaysOnTopHint)

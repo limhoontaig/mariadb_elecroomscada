@@ -541,3 +541,12 @@ class SCADAWindow(QMainWindow):
                 "백업 실패", 
                 f"DB 백업 중 오류가 발생했습니다.\n\nmysqldump 경로 설정이나 DB 권한을 확인하세요.\n\n에러 내용:\n{message}"
             )
+
+    def update_rs485_status(self, is_connected: bool):
+        """RS485 통신 상태에 따라 메인 화면 라벨 색상과 텍스트를 변경합니다."""
+        if is_connected:
+            self.lbl_rs485_status.setText("🟢 통신 정상")
+            self.lbl_rs485_status.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold; padding: 6px 12px; border-radius: 4px;")
+        else:
+            self.lbl_rs485_status.setText("🔴 통신 단절")
+            self.lbl_rs485_status.setStyleSheet("background-color: #c0392b; color: yellow; font-weight: bold; padding: 6px 12px; border-radius: 4px;")
