@@ -33,27 +33,53 @@ class CommSignal(QObject):
 comm_signal = CommSignal()
 
 def serial_receive_thread():
-    time.sleep(3)
-    try:
-        ser = serial.Serial(port=COM_PORT, baudrate=BAUD_RATE, timeout=0.1)
-        print(f"통신 엔진 가동 완료: {COM_PORT} @ {BAUD_RATE}")
-    except Exception as e:
-        print(f"시리얼 포트 개방 실패: {e}")
-        # ⭐ [추가] 포트 자체가 안 열리면 바로 빨간불(단절) 신호 송출
-        comm_signal.status_changed.emit(False)
-        return
-
-    buffer = b""
-    buffer = b""
-    # ⭐ [추가] 마지막으로 통신에 성공한 시간을 기록하는 변수
+    time.sleep(1) # 화면이 켜질 시간을 잠시 벌어줍니다.
+    
+    current_status = None
     last_success_time = time.time()
+    
+    # ⭐ [핵심 추가] 혹시 메인 화면이 신호를 놓쳤을 경우를 대비한 '주기적 알림 타이머'
+    last_emit_time = time.time() 
+    
+    ser = None
+    buffer = b""
 
     while True:
         try:
-            # ⭐ [추가] 5초 이상 아무런 데이터가 들어오지 않으면 (PLC가 꺼졌거나 선이 빠짐) 빨간불 송출
-            if time.time() - last_success_time > 5.0:
-                comm_signal.status_changed.emit(False)
+            # 1. 포트 개방 시도 및 단절 처리
+            if ser is None or not ser.is_open:
+                try:
+                    ser = serial.Serial(port=COM_PORT, baudrate=BAUD_RATE, timeout=0.1)
+                    print(f"통신 엔진 가동 완료: {COM_PORT} @ {BAUD_RATE}")
+                    buffer = b"" 
+                    last_success_time = time.time() 
+                except Exception as e:
+                    now = time.time()
+                    # ⭐ 상태가 바뀌었거나, 마지막으로 알려준 지 3초가 지났다면 다시 신호 발송!
+                    if current_status != False or (now - last_emit_time > 3.0):
+                        try:
+                            comm_signal.status_changed.emit(False)
+                        except RuntimeError:
+                            pass
+                        current_status = False
+                        last_emit_time = now
+                        
+                    time.sleep(2)
+                    continue 
 
+            # 2. 5초 이상 아무런 데이터가 들어오지 않으면 (PLC 꺼짐 등)
+            if time.time() - last_success_time > 5.0:
+                now = time.time()
+                # ⭐ 마찬가지로 3초마다 현재 단절 상태를 메인 화면에 갱신
+                if current_status != False or (now - last_emit_time > 3.0):  
+                    try:
+                        comm_signal.status_changed.emit(False)
+                    except RuntimeError:
+                        pass
+                    current_status = False
+                    last_emit_time = now
+
+            # 3. 데이터 정상 수신 처리
             if ser.in_waiting > 0:
                 buffer += ser.read(ser.in_waiting)
                 
@@ -73,25 +99,17 @@ def serial_receive_thread():
                         
                         if verify_crc(packet):
                             raw_values = packet[7:7+(NUM_WORDS * 2)]
-                            
-                            # 50개 워드를 각각 안전하게 가져옵니다.
                             raw_words = struct.unpack(f'>{NUM_WORDS}h', raw_values)
                             
-                            # KEP_P_mWh 가 위치한 D915, D916 자리 추출
                             word_1 = raw_words[15]   
                             word_2 = raw_words[16]   
-                            
                             u_word1 = word_1 if word_1 >= 0 else word_1 + 65536
                             u_word2 = word_2 if word_2 >= 0 else word_2 + 65536
                             
-                            # 💡 현장 계측기 값과 상하위 워드 순서 확인용 수식 (반전 필요시 아래 주석 체인지)
-                            # dint_mwh = (u_word1 << 16) + u_word2
                             dint_mwh = (u_word2 << 16) + u_word1
-                            
                             if dint_mwh & 0x80000000:
                                 dint_mwh -= 0x100000000
                                 
-                            # 2개의 16비트 워드를 1개의 32비트 결합 데이터로 팩킹 후 리스트 재구성
                             values = (
                                 list(raw_words[:15]) +    
                                 [dint_mwh] +              
@@ -101,31 +119,34 @@ def serial_receive_thread():
                             insert_raw_data(values)
                             buffer = buffer[expected_len:] 
 
-                            # ⭐ [추가] 데이터 수신 및 처리가 완벽히 성공했으므로 초록불(정상) 송출 및 시간 갱신
-                            comm_signal.status_changed.emit(True)
+                            # ⭐ 정상 수신 시 초록불 갱신 (3초 동기화 적용)
+                            now = time.time()
+                            if current_status != True or (now - last_emit_time > 3.0):
+                                try:
+                                    comm_signal.status_changed.emit(True)
+                                except RuntimeError:
+                                    pass
+                                current_status = True
+                                last_emit_time = now
+                                
                             last_success_time = time.time()
 
                         else:
                             buffer = buffer[1:]
 
-                    # --------------------------------------------------
-                    # 2. FC 0x03 또는 FC 0x04 (읽기/하트비트) 처리
-                    # --------------------------------------------------
-                    elif func_code in (0x03, 0x04): # 💡 수정 1: 0x04 요청 허용
+                    elif func_code in (0x03, 0x04): 
                         expected_len = 8 
-                        
                         if len(buffer) < expected_len:
                             break
                         
                         packet = buffer[:expected_len]
-                        # print(f"\n[Rx] 읽기 요청 수신: {packet.hex().upper()}")
                         
                         if verify_crc(packet):
                             start_addr = struct.unpack('>H', packet[2:4])[0]
                             num_words = struct.unpack('>H', packet[4:6])[0]
                             
                             reply_data = []
-                            HEARTBEAT_ADDR = 0 # 💡 수정 2: PLC가 요청하는 0번지로 세팅
+                            HEARTBEAT_ADDR = 0 
                             
                             for i in range(num_words):
                                 current_addr = start_addr + i
@@ -142,33 +163,46 @@ def serial_receive_thread():
                             crc_bytes = calculate_crc(reply_without_crc)
                             final_reply = reply_without_crc + crc_bytes
                             
-                            # print(f" ┗ [Tx] 응답 송신: {final_reply.hex().upper()}\n")
-                            
                             time.sleep(0.01) 
                             ser.write(final_reply)
-                            
                             buffer = buffer[expected_len:]
 
-                            # ⭐ [추가] 응답(하트비트) 처리가 완벽히 성공했으므로 초록불(정상) 송출 및 시간 갱신
-                            comm_signal.status_changed.emit(True)
+                            # ⭐ 정상 응답 시 초록불 갱신 (3초 동기화 적용)
+                            now = time.time()
+                            if current_status != True or (now - last_emit_time > 3.0):
+                                try:
+                                    comm_signal.status_changed.emit(True)
+                                except RuntimeError:
+                                    pass
+                                current_status = True
+                                last_emit_time = now
+                                
                             last_success_time = time.time()
 
                         else:
-                            # print(f"❌ [에러] CRC 검증 실패: {packet.hex().upper()}")
                             buffer = buffer[1:]
                     else:
                         buffer = buffer[1:]
 
-                time.sleep(0.01)
+            time.sleep(0.01)
+            
         except Exception as e:
             print(f"시리얼 수신 스레드 예외 발생: {e}")
-            # ⭐ [수정] 프로그램 종료 시 메모리 파괴로 인한 RuntimeError 방지
-            try:
-                comm_signal.status_changed.emit(False)
-            except RuntimeError:
-                pass # 이미 프로그램이 종료되어 객체가 삭제된 경우 조용히 무시합니다.
+            if ser:
+                ser.close()
+                ser = None
+                
+            # ⭐ 치명적 에러 시 빨간불 갱신 (3초 동기화 적용)
+            now = time.time()
+            if current_status != False or (now - last_emit_time > 3.0):
+                try:
+                    comm_signal.status_changed.emit(False)
+                except RuntimeError:
+                    pass
+                current_status = False
+                last_emit_time = now
             
-            break
+            time.sleep(1)
 
 def insert_raw_data(values):
     if len(values) < len(DATA_LABELS): return
