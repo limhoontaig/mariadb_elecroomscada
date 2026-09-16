@@ -22,7 +22,7 @@ def get_com_port():
 COM_PORT = get_com_port()
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
-NUM_WORDS = 50   
+NUM_WORDS = 52   
 
 # 1. 시그널을 담을 전역 클래스 생성
 class CommSignal(QObject):
@@ -212,7 +212,7 @@ def insert_raw_data(values):
         now = datetime.now()
         l_date, l_time = now.strftime('%Y-%m-%d'), now.strftime('%H:%M:%S')
         
-        DIV_BY_10 = {"실내온도", "외기온도", "SF운전시간", "EF운전시간", "Tr1_Temp", "Tr2_Temp", "Tr3_Temp"}
+        DIV_BY_10 = {"실내온도", "외기온도", "SF운전시간", "EF운전시간", "Tr1_Temp", "Tr2_Temp", "Tr3_Temp", "에어콘01온도", "에어콘02온도"}
         DIV_BY_100 = {"KEP_A_R", "KEP_A_S", "KEP_A_T", "KEP_frequency", "KEP_V_R", "KEP_V_S", "KEP_V_T", "KEP_V_R_S", "KEP_V_S_T", "KEP_V_T_R", "KEP_P_mWh"}
         
         adjusted_values = []
