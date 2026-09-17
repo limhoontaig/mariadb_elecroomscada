@@ -1,11 +1,13 @@
 # ui_main_window.py 수정본
 import os
 import sqlite3
+import configparser
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
                              QLabel, QDateEdit, QPushButton, QStackedWidget, QSplitter, 
-                             QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog)
+                             QTableWidget, QTableWidgetItem, QMessageBox, QFileDialog, 
+                             QDialog, QDoubleSpinBox)
 from PyQt5.QtCore import QTimer, QDate, Qt
 from PyQt5.QtGui import QIcon
 
@@ -16,6 +18,7 @@ import db_manager
 import excel_report
 import mariadb_backup
 from ui_dialogs import ManualMeterInputDialog, FieldInspectionDialog 
+import plc_worker # 통신 스레드가 있는 파일을 임포트합니다.
 
 class SCADAWindow(QMainWindow):
     def __init__(self):
@@ -40,11 +43,22 @@ class SCADAWindow(QMainWindow):
         icon_path = self.resource_path("free-icon-folder-2015058.ico")
         self.setWindowIcon(QIcon(icon_path))
         self.setWindowTitle("래미안개포루체하임아파트 변전실 데이터 통합 관리 시스템 (Developed by 관리과장 임훈택)")
-        self.resize(1400, 900)
+        self.resize(1400, 1000)
         
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
+        """
+        # 👇👇👇 [여기에 딱 4줄만 추가해 주세요] 👇👇👇
+        self.lbl_main_title = QLabel("래미안개포루체하임아파트 변전실 통합 SCADA 시스템")
+        self.lbl_main_title.setAlignment(Qt.AlignCenter)
+        self.lbl_main_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50; margin-bottom: 5px;")
+        self.lbl_main_title.mouseDoubleClickEvent = self.open_ac_settings_dialog
+        # 👆👆👆 [추가 끝] 👆👆👆
+
+        main_layout.addWidget(self.lbl_main_title) # 💡 화면에 실제로 그려주는 핵심 줄!
+        """
 
         # ==================== 상단 제어 센터 ====================
         top_ctrl = QGroupBox("운영 제어 센터")
@@ -68,6 +82,10 @@ class SCADAWindow(QMainWindow):
         
         lbl_date_title = QLabel("<b>선택 날짜:</b>")
         lbl_date_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+
+        # 👇👇👇 [여기에 추가] "선택 날짜:" 글자를 더블클릭하면 팝업 실행 👇👇👇
+        lbl_date_title.mouseDoubleClickEvent = self.open_ac_settings_dialog
+        # 👆👆👆 [추가 끝] 👆👆👆
 
         # ⭐ [신규] RS485 통신 상태 라벨 생성
         self.lbl_rs485_status = QLabel("⚫ 통신 확인 중...")
@@ -163,6 +181,14 @@ class SCADAWindow(QMainWindow):
         splitter.addWidget(self.inspection_table)
         # 👆👆👆 [추가 끝] 👆👆👆
 
+        # 👇👇👇 [여기에 신규 추가] 모든 테이블의 줄 간격(높이)을 22픽셀로 압축 👇👇👇
+        self.raw_table.verticalHeader().setDefaultSectionSize(22)
+        self.avg_table.verticalHeader().setDefaultSectionSize(22)
+        self.extreme_table.verticalHeader().setDefaultSectionSize(22)
+        self.manual_table.verticalHeader().setDefaultSectionSize(22)
+        self.inspection_table.verticalHeader().setDefaultSectionSize(22)
+        # 👆👆👆 [추가 끝] 👆👆👆
+
         table_layout.addWidget(splitter)
         self.stack.addWidget(self.page_table)
 
@@ -179,6 +205,10 @@ class SCADAWindow(QMainWindow):
         self.qdate.dateChanged.connect(self.auto_refresh)
 
         self.load_data()
+
+    def open_ac_settings_dialog(self, event):
+        dialog = ACSettingsDialog(self)
+        dialog.exec_()
 
     def check_daily_backup(self):
         """백그라운드에서 매시간 돌며 자정이 지났는지 확인하고 연 단위 백업 파일 최신화"""
@@ -550,3 +580,65 @@ class SCADAWindow(QMainWindow):
         else:
             self.lbl_rs485_status.setText("🔴 통신 단절")
             self.lbl_rs485_status.setStyleSheet("background-color: #c0392b; color: yellow; font-weight: bold; padding: 6px 12px; border-radius: 4px;")
+
+# 1. 관리자용 팝업 창 클래스 정의
+class ACSettingsDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙️ 에어컨 온도 설정 (관리자 전용)")
+        self.setFixedSize(320, 250)
+        self.config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
+        self.config = configparser.ConfigParser()
+        self.init_ui()
+        self.load_settings()
+
+    def init_ui(self):
+        layout = QVBoxLayout()
+        
+        # 입력칸(SpinBox) 생성 및 범위 설정
+        self.spin_start1 = QDoubleSpinBox(); self.spin_start1.setRange(20.0, 35.0); self.spin_start1.setSingleStep(0.5)
+        self.spin_start2 = QDoubleSpinBox(); self.spin_start2.setRange(20.0, 35.0); self.spin_start2.setSingleStep(0.5)
+        self.spin_stop = QDoubleSpinBox(); self.spin_stop.setRange(15.0, 30.0); self.spin_stop.setSingleStep(0.5)
+        self.spin_cold = QDoubleSpinBox(); self.spin_cold.setRange(10.0, 25.0); self.spin_cold.setSingleStep(0.5)
+
+        # 화면 배치
+        self.add_row(layout, "1단계 기동 온도 (℃):", self.spin_start1)
+        self.add_row(layout, "2단계 기동 온도 (℃):", self.spin_start2)
+        self.add_row(layout, "정지 및 순번 교대 온도 (℃):", self.spin_stop)
+        self.add_row(layout, "찬바람 인식 기준 온도 (℃):", self.spin_cold)
+
+        # 저장 버튼
+        btn_save = QPushButton("저장 및 즉시 적용")
+        btn_save.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white; padding: 10px;")
+        btn_save.clicked.connect(self.save_settings)
+        layout.addWidget(btn_save)
+        self.setLayout(layout)
+
+    def add_row(self, layout, label_text, widget):
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label_text))
+        row.addWidget(widget)
+        layout.addLayout(row)
+
+    def load_settings(self):
+        self.config.read(self.config_path, encoding='utf-8')
+        if 'AC_SETTINGS' in self.config:
+            self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.0))
+            self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0))
+            self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 25.0))
+            self.spin_cold.setValue(self.config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 20.0))
+
+    def save_settings(self):
+        if 'AC_SETTINGS' not in self.config:
+            self.config['AC_SETTINGS'] = {}
+        self.config['AC_SETTINGS']['START_TEMP_1'] = str(self.spin_start1.value())
+        self.config['AC_SETTINGS']['START_TEMP_2'] = str(self.spin_start2.value())
+        self.config['AC_SETTINGS']['STOP_TEMP'] = str(self.spin_stop.value())
+        self.config['AC_SETTINGS']['COLD_WIND_TEMP'] = str(self.spin_cold.value())
+
+        with open(self.config_path, 'w', encoding='utf-8') as f:
+            self.config.write(f)
+        
+        # 💡 핵심: 저장 즉시 plc_worker의 변수를 새로고침하여 재시작 없이 로직에 반영
+        plc_worker.load_ac_settings() 
+        self.accept()

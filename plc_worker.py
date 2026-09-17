@@ -23,7 +23,27 @@ def get_com_port():
 COM_PORT = get_com_port()
 BAUD_RATE = 19200         
 MY_SLAVE_ID = 5           
-NUM_WORDS = 52   
+NUM_WORDS = 52 
+
+# 전역 변수로 온도 기준값 선언
+TEMP_START_1 = 28.0
+TEMP_START_2 = 31.0
+TEMP_STOP = 25.0
+TEMP_COLD = 20.0
+
+def load_ac_settings():
+    """config.ini에서 온도 설정값을 읽어와 전역 변수를 업데이트합니다."""
+    global TEMP_START_1, TEMP_START_2, TEMP_STOP, TEMP_COLD
+    if os.path.exists(config_path):
+        config.read(config_path, encoding='utf-8')
+        if 'AC_SETTINGS' in config:
+            TEMP_START_1 = config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.0)
+            TEMP_START_2 = config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0)
+            TEMP_STOP = config['AC_SETTINGS'].getfloat('STOP_TEMP', 25.0)
+            TEMP_COLD = config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 20.0)
+
+# 프로그램 시작 시 최초 1회 로드
+load_ac_settings()
 
 # 1. 시그널을 담을 전역 클래스 생성
 class CommSignal(QObject):
@@ -73,14 +93,14 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2):
     dis_temps = {1: dis_temp1, 2: dis_temp2}
 
     if ac_state == "STANDBY":
-        if indoor_temp >= 28.0:
+        if indoor_temp >= TEMP_START_1:
             print(f"\n🚨 [1단계 온도 상승] 실내 {indoor_temp:.1f}℃. 선행 {lead_ac}호기 가동 지시!")
             threading.Thread(target=send_ir_task, args=(hubs[lead_ac], IR_TURN_ON_29C)).start()
             ac_state = "STARTING_1"
             ac_start_time = time.time()
 
     elif ac_state == "STARTING_1":
-        if dis_temps[lead_ac] <= 20.0:
+        if dis_temps[lead_ac] <= TEMP_COLD:
             print(f"❄️ {lead_ac}호기 찬바람 확인! 환기팬 정지.")
             fan_control_cmd = 1 
             ac_state = "COOLING_1"
@@ -88,12 +108,12 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2):
             print(f"⚠️ {lead_ac}호기 찬바람 미감지!")
 
     elif ac_state == "COOLING_1":
-        if indoor_temp >= 31.0:
+        if indoor_temp >= TEMP_START_2:
             print(f"\n🚨🚨 [2단계 온도 상승] 실내 {indoor_temp:.1f}℃. 후행 {lag_ac}호기 가동 지시!")
             threading.Thread(target=send_ir_task, args=(hubs[lag_ac], IR_TURN_ON_29C)).start()
             ac_state = "STARTING_2"
             ac_start_time = time.time()
-        elif indoor_temp <= 25.0:
+        elif indoor_temp <= TEMP_STOP:
             print(f"\n✅ 온도 안정화 (실내:{indoor_temp:.1f}℃). {lead_ac}호기 정지 및 순번 교대!")
             threading.Thread(target=send_ir_task, args=(hubs[lead_ac], IR_TURN_OFF)).start()
             lead_ac = lag_ac  
@@ -101,14 +121,14 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2):
             ac_state = "STANDBY"
 
     elif ac_state == "STARTING_2":
-        if dis_temps[lag_ac] <= 20.0:
+        if dis_temps[lag_ac] <= TEMP_COLD:
             print(f"❄️ {lag_ac}호기 찬바람 확인! 2대 동시 냉방 돌입.")
             ac_state = "COOLING_2"
         elif time.time() - ac_start_time > 300:
             print(f"⚠️ {lag_ac}호기 찬바람 미감지!")
 
     elif ac_state == "COOLING_2":
-        if indoor_temp <= 25.0:
+        if indoor_temp <= TEMP_STOP:
             print(f"\n✅ 전체 온도 안정화 (실내:{indoor_temp:.1f}℃). 전호기 정지 및 순번 교대!")
             threading.Thread(target=send_ir_task, args=(HUB1_IP, IR_TURN_OFF)).start()
             threading.Thread(target=send_ir_task, args=(HUB2_IP, IR_TURN_OFF)).start()
