@@ -1,13 +1,15 @@
-# plc_worker.py
 import serial
 import struct
 import time
 import configparser
 import os
+import random
+import threading
+import broadlink
 from datetime import datetime, timedelta
 from PyQt5.QtCore import QObject, pyqtSignal
 
-from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection  # 💡 db_manager에서는 경로와 라벨만 가져옴
+from db_manager import DATA_LABELS, get_db_connection, get_db_raw_connection
 
 config = configparser.ConfigParser()
 config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
@@ -16,8 +18,7 @@ def get_com_port():
     if os.path.exists(config_path):
         config.read(config_path, encoding='utf-8')
         return config['SETTINGS'].get('COM_PORT', 'COM3')
-    return 'COM3' # 기본값
-
+    return 'COM3'
 
 COM_PORT = get_com_port()
 BAUD_RATE = 19200         
@@ -32,21 +33,102 @@ class CommSignal(QObject):
 # 다른 파일에서 접근할 수 있도록 인스턴스 생성
 comm_signal = CommSignal()
 
+# =================================================================
+# ⚙️ [에어컨 제어 로직 설정 구역]
+# =================================================================
+SIMULATION_MODE = False  
+
+HUB1_IP = '192.168.2.5' 
+HUB2_IP = '192.168.2.4' 
+
+IR_TURN_ON_29C  = "260040006200013c103211120f120f120f330f120f120f120f120f120f111011101110111011101110321033103210111011103210321011101110321011101110000d05" 
+IR_TURN_OFF = "260040006300013c0f330f130f120f120f330f120f120f120f3210330f120f120f1210111011101110111011101110110f120f330f120f330f120f130e130e340f000d05"
+
+ac_state = "STANDBY"
+ac_start_time = 0
+fan_control_cmd = 0 # 💡 PLC가 읽어갈 환기팬 제어 명령 (0:자동, 1:정지)
+lead_ac = 1  
+
+def send_ir_task(ip_address, hex_code):
+    """Modbus 통신 지연을 막기 위해 백그라운드 스레드에서 실행되는 IR 함수"""
+    if SIMULATION_MODE:
+        print(f"   [시뮬레이션] 📡 {ip_address}로 IR 신호 전송 완료")
+        return
+    try:
+        device = broadlink.hello(ip_address)
+        device.auth()
+        packet = bytes.fromhex(hex_code)
+        device.send_data(packet)
+        print(f"📡 [IR 발사 성공] 대상 IP: {ip_address}")
+    except Exception as e:
+        print(f"❌ [IR 발사 실패] ({ip_address}): {e}")
+
+def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2):
+    global ac_state, ac_start_time, fan_control_cmd, lead_ac
+
+    if indoor_temp is None: return
+
+    lag_ac = 2 if lead_ac == 1 else 1
+    hubs = {1: HUB1_IP, 2: HUB2_IP}
+    dis_temps = {1: dis_temp1, 2: dis_temp2}
+
+    if ac_state == "STANDBY":
+        if indoor_temp >= 28.0:
+            print(f"\n🚨 [1단계 온도 상승] 실내 {indoor_temp:.1f}℃. 선행 {lead_ac}호기 가동 지시!")
+            threading.Thread(target=send_ir_task, args=(hubs[lead_ac], IR_TURN_ON_29C)).start()
+            ac_state = "STARTING_1"
+            ac_start_time = time.time()
+
+    elif ac_state == "STARTING_1":
+        if dis_temps[lead_ac] <= 20.0:
+            print(f"❄️ {lead_ac}호기 찬바람 확인! 환기팬 정지.")
+            fan_control_cmd = 1 
+            ac_state = "COOLING_1"
+        elif time.time() - ac_start_time > 300: 
+            print(f"⚠️ {lead_ac}호기 찬바람 미감지!")
+
+    elif ac_state == "COOLING_1":
+        if indoor_temp >= 31.0:
+            print(f"\n🚨🚨 [2단계 온도 상승] 실내 {indoor_temp:.1f}℃. 후행 {lag_ac}호기 가동 지시!")
+            threading.Thread(target=send_ir_task, args=(hubs[lag_ac], IR_TURN_ON_29C)).start()
+            ac_state = "STARTING_2"
+            ac_start_time = time.time()
+        elif indoor_temp <= 25.0:
+            print(f"\n✅ 온도 안정화 (실내:{indoor_temp:.1f}℃). {lead_ac}호기 정지 및 순번 교대!")
+            threading.Thread(target=send_ir_task, args=(hubs[lead_ac], IR_TURN_OFF)).start()
+            lead_ac = lag_ac  
+            fan_control_cmd = 0 
+            ac_state = "STANDBY"
+
+    elif ac_state == "STARTING_2":
+        if dis_temps[lag_ac] <= 20.0:
+            print(f"❄️ {lag_ac}호기 찬바람 확인! 2대 동시 냉방 돌입.")
+            ac_state = "COOLING_2"
+        elif time.time() - ac_start_time > 300:
+            print(f"⚠️ {lag_ac}호기 찬바람 미감지!")
+
+    elif ac_state == "COOLING_2":
+        if indoor_temp <= 25.0:
+            print(f"\n✅ 전체 온도 안정화 (실내:{indoor_temp:.1f}℃). 전호기 정지 및 순번 교대!")
+            threading.Thread(target=send_ir_task, args=(HUB1_IP, IR_TURN_OFF)).start()
+            threading.Thread(target=send_ir_task, args=(HUB2_IP, IR_TURN_OFF)).start()
+            lead_ac = lag_ac  
+            fan_control_cmd = 0 
+            ac_state = "STANDBY"
+
+# =================================================================
+# 🔄 [시리얼 통신 및 데이터 처리]
+# =================================================================
 def serial_receive_thread():
-    time.sleep(1) # 화면이 켜질 시간을 잠시 벌어줍니다.
-    
+    time.sleep(1) 
     current_status = None
     last_success_time = time.time()
-    
-    # ⭐ [핵심 추가] 혹시 메인 화면이 신호를 놓쳤을 경우를 대비한 '주기적 알림 타이머'
     last_emit_time = time.time() 
-    
     ser = None
     buffer = b""
 
     while True:
         try:
-            # 1. 포트 개방 시도 및 단절 처리
             if ser is None or not ser.is_open:
                 try:
                     ser = serial.Serial(port=COM_PORT, baudrate=BAUD_RATE, timeout=0.1)
@@ -55,31 +137,20 @@ def serial_receive_thread():
                     last_success_time = time.time() 
                 except Exception as e:
                     now = time.time()
-                    # ⭐ 상태가 바뀌었거나, 마지막으로 알려준 지 3초가 지났다면 다시 신호 발송!
                     if current_status != False or (now - last_emit_time > 3.0):
-                        try:
-                            comm_signal.status_changed.emit(False)
-                        except RuntimeError:
-                            pass
-                        current_status = False
-                        last_emit_time = now
-                        
+                        try: comm_signal.status_changed.emit(False)
+                        except RuntimeError: pass
+                        current_status = False; last_emit_time = now
                     time.sleep(2)
                     continue 
 
-            # 2. 5초 이상 아무런 데이터가 들어오지 않으면 (PLC 꺼짐 등)
             if time.time() - last_success_time > 5.0:
                 now = time.time()
-                # ⭐ 마찬가지로 3초마다 현재 단절 상태를 메인 화면에 갱신
                 if current_status != False or (now - last_emit_time > 3.0):  
-                    try:
-                        comm_signal.status_changed.emit(False)
-                    except RuntimeError:
-                        pass
-                    current_status = False
-                    last_emit_time = now
+                    try: comm_signal.status_changed.emit(False)
+                    except RuntimeError: pass
+                    current_status = False; last_emit_time = now
 
-            # 3. 데이터 정상 수신 처리
             if ser.in_waiting > 0:
                 buffer += ser.read(ser.in_waiting)
                 
@@ -89,14 +160,13 @@ def serial_receive_thread():
                         continue
                     
                     func_code = buffer[1]
+                    
+                    # 📥 [PLC -> PC: 데이터 저장 및 제어 로직 실행]
                     if func_code == 0x10:
                         expected_len = 7 + (NUM_WORDS * 2) + 2 
-                        
-                        if len(buffer) < expected_len: 
-                            break 
+                        if len(buffer) < expected_len: break 
                         
                         packet = buffer[:expected_len]
-                        
                         if verify_crc(packet):
                             raw_values = packet[7:7+(NUM_WORDS * 2)]
                             raw_words = struct.unpack(f'>{NUM_WORDS}h', raw_values)
@@ -105,53 +175,51 @@ def serial_receive_thread():
                             word_2 = raw_words[16]   
                             u_word1 = word_1 if word_1 >= 0 else word_1 + 65536
                             u_word2 = word_2 if word_2 >= 0 else word_2 + 65536
-                            
                             dint_mwh = (u_word2 << 16) + u_word1
-                            if dint_mwh & 0x80000000:
-                                dint_mwh -= 0x100000000
+                            if dint_mwh & 0x80000000: dint_mwh -= 0x100000000
                                 
-                            values = (
-                                list(raw_words[:15]) +    
-                                [dint_mwh] +              
-                                list(raw_words[17:])      
-                            )
+                            values = (list(raw_words[:15]) + [dint_mwh] + list(raw_words[17:]))
                             
+                            # 1. DB에 저장
                             insert_raw_data(values)
+                            
+                            # 2. 에어컨 온도 로직 판단
+                            indoor_temp = values[0] / 10.0
+                            outdoor_temp = values[1] / 10.0
+                            ac1_temp = values[50] / 10.0
+                            ac2_temp = values[51] / 10.0
+                            check_and_control(indoor_temp, outdoor_temp, ac1_temp, ac2_temp)
+                            
                             buffer = buffer[expected_len:] 
-
-                            # ⭐ 정상 수신 시 초록불 갱신 (3초 동기화 적용)
                             now = time.time()
                             if current_status != True or (now - last_emit_time > 3.0):
-                                try:
-                                    comm_signal.status_changed.emit(True)
-                                except RuntimeError:
-                                    pass
-                                current_status = True
-                                last_emit_time = now
-                                
+                                try: comm_signal.status_changed.emit(True)
+                                except RuntimeError: pass
+                                current_status = True; last_emit_time = now
                             last_success_time = time.time()
-
                         else:
                             buffer = buffer[1:]
 
+                    # 📤 [PC -> PLC: 환기팬 제어 상태값 전달]
                     elif func_code in (0x03, 0x04): 
                         expected_len = 8 
-                        if len(buffer) < expected_len:
-                            break
+                        if len(buffer) < expected_len: break
                         
                         packet = buffer[:expected_len]
-                        
                         if verify_crc(packet):
                             start_addr = struct.unpack('>H', packet[2:4])[0]
                             num_words = struct.unpack('>H', packet[4:6])[0]
                             
                             reply_data = []
                             HEARTBEAT_ADDR = 0 
+                            FAN_CMD_ADDR = 1  # 💡 PLC가 환기팬 명령을 읽어갈 주소 (1번 번지)
                             
                             for i in range(num_words):
                                 current_addr = start_addr + i
                                 if current_addr == HEARTBEAT_ADDR:
                                     reply_data.append(1)
+                                elif current_addr == FAN_CMD_ADDR:
+                                    reply_data.append(fan_control_cmd) # 에어컨 로직 결과(0 또는 1) 전송
                                 else:
                                     reply_data.append(0)
                             
@@ -167,18 +235,12 @@ def serial_receive_thread():
                             ser.write(final_reply)
                             buffer = buffer[expected_len:]
 
-                            # ⭐ 정상 응답 시 초록불 갱신 (3초 동기화 적용)
                             now = time.time()
                             if current_status != True or (now - last_emit_time > 3.0):
-                                try:
-                                    comm_signal.status_changed.emit(True)
-                                except RuntimeError:
-                                    pass
-                                current_status = True
-                                last_emit_time = now
-                                
+                                try: comm_signal.status_changed.emit(True)
+                                except RuntimeError: pass
+                                current_status = True; last_emit_time = now
                             last_success_time = time.time()
-
                         else:
                             buffer = buffer[1:]
                     else:
@@ -189,19 +251,12 @@ def serial_receive_thread():
         except Exception as e:
             print(f"시리얼 수신 스레드 예외 발생: {e}")
             if ser:
-                ser.close()
-                ser = None
-                
-            # ⭐ 치명적 에러 시 빨간불 갱신 (3초 동기화 적용)
+                ser.close(); ser = None
             now = time.time()
             if current_status != False or (now - last_emit_time > 3.0):
-                try:
-                    comm_signal.status_changed.emit(False)
-                except RuntimeError:
-                    pass
-                current_status = False
-                last_emit_time = now
-            
+                try: comm_signal.status_changed.emit(False)
+                except RuntimeError: pass
+                current_status = False; last_emit_time = now
             time.sleep(1)
 
 def insert_raw_data(values):
@@ -222,7 +277,6 @@ def insert_raw_data(values):
             else: adjusted_values.append(float(val))
 
         placeholders = ", ".join(["%s"] * len(adjusted_values))
-        
         col_names = ", ".join([f"`{name}`" for name in DATA_LABELS])
         
         query = f"INSERT INTO raw_data (log_date, log_time, {col_names}) VALUES (%s, %s, {placeholders})"
