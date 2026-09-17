@@ -182,11 +182,12 @@ class SCADAWindow(QMainWindow):
         # 👆👆👆 [추가 끝] 👆👆👆
 
         # 👇👇👇 [여기에 신규 추가] 모든 테이블의 줄 간격(높이)을 22픽셀로 압축 👇👇👇
-        self.raw_table.verticalHeader().setDefaultSectionSize(22)
-        self.avg_table.verticalHeader().setDefaultSectionSize(22)
-        self.extreme_table.verticalHeader().setDefaultSectionSize(22)
-        self.manual_table.verticalHeader().setDefaultSectionSize(22)
-        self.inspection_table.verticalHeader().setDefaultSectionSize(22)
+        vertical_size = 20
+        self.raw_table.verticalHeader().setDefaultSectionSize(vertical_size)
+        self.avg_table.verticalHeader().setDefaultSectionSize(vertical_size)
+        self.extreme_table.verticalHeader().setDefaultSectionSize(vertical_size)
+        self.manual_table.verticalHeader().setDefaultSectionSize(vertical_size)
+        self.inspection_table.verticalHeader().setDefaultSectionSize(vertical_size)
         # 👆👆👆 [추가 끝] 👆👆👆
 
         table_layout.addWidget(splitter)
