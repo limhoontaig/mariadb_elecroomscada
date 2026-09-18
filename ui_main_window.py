@@ -49,7 +49,7 @@ class SCADAWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        """
+        
         # 👇👇👇 [여기에 딱 4줄만 추가해 주세요] 👇👇👇
         self.lbl_main_title = QLabel("래미안개포루체하임아파트 변전실 통합 SCADA 시스템")
         self.lbl_main_title.setAlignment(Qt.AlignCenter)
@@ -58,7 +58,9 @@ class SCADAWindow(QMainWindow):
         # 👆👆👆 [추가 끝] 👆👆👆
 
         main_layout.addWidget(self.lbl_main_title) # 💡 화면에 실제로 그려주는 핵심 줄!
-        """
+
+        self.lbl_main_title.mouseDoubleClickEvent = self.open_ac_settings_dialog
+        
 
         # ==================== 상단 제어 센터 ====================
         top_ctrl = QGroupBox("운영 제어 센터")
@@ -181,14 +183,14 @@ class SCADAWindow(QMainWindow):
         splitter.addWidget(self.inspection_table)
         # 👆👆👆 [추가 끝] 👆👆👆
 
-        # 👇👇👇 [여기에 신규 추가] 모든 테이블의 줄 간격(높이)을 22픽셀로 압축 👇👇👇
-        vertical_size = 20
+        """# 👇👇👇 [여기에 신규 추가] 모든 테이블의 줄 간격(높이)을 22픽셀로 압축 👇👇👇
+        vertical_size = 23
         self.raw_table.verticalHeader().setDefaultSectionSize(vertical_size)
         self.avg_table.verticalHeader().setDefaultSectionSize(vertical_size)
         self.extreme_table.verticalHeader().setDefaultSectionSize(vertical_size)
         self.manual_table.verticalHeader().setDefaultSectionSize(vertical_size)
         self.inspection_table.verticalHeader().setDefaultSectionSize(vertical_size)
-        # 👆👆👆 [추가 끝] 👆👆👆
+        # 👆👆👆 [추가 끝] 👆👆👆"""
 
         table_layout.addWidget(splitter)
         self.stack.addWidget(self.page_table)
@@ -597,10 +599,10 @@ class ACSettingsDialog(QDialog):
         layout = QVBoxLayout()
         
         # 입력칸(SpinBox) 생성 및 범위 설정
-        self.spin_start1 = QDoubleSpinBox(); self.spin_start1.setRange(20.0, 35.0); self.spin_start1.setSingleStep(0.5)
-        self.spin_start2 = QDoubleSpinBox(); self.spin_start2.setRange(20.0, 35.0); self.spin_start2.setSingleStep(0.5)
-        self.spin_stop = QDoubleSpinBox(); self.spin_stop.setRange(15.0, 30.0); self.spin_stop.setSingleStep(0.5)
-        self.spin_cold = QDoubleSpinBox(); self.spin_cold.setRange(10.0, 25.0); self.spin_cold.setSingleStep(0.5)
+        self.spin_start1 = QDoubleSpinBox(); self.spin_start1.setRange(29.0, 35.0); self.spin_start1.setSingleStep(0.5)
+        self.spin_start2 = QDoubleSpinBox(); self.spin_start2.setRange(30.0, 35.0); self.spin_start2.setSingleStep(0.5)
+        self.spin_stop = QDoubleSpinBox(); self.spin_stop.setRange(27.0, 30.0); self.spin_stop.setSingleStep(0.5)
+        self.spin_cold = QDoubleSpinBox(); self.spin_cold.setRange(20.0, 25.0); self.spin_cold.setSingleStep(0.5)
 
         # 화면 배치
         self.add_row(layout, "1단계 기동 온도 (℃):", self.spin_start1)
@@ -624,9 +626,9 @@ class ACSettingsDialog(QDialog):
     def load_settings(self):
         self.config.read(self.config_path, encoding='utf-8')
         if 'AC_SETTINGS' in self.config:
-            self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.0))
-            self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0))
-            self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 25.0))
+            self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 29.0))
+            self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 30.0))
+            self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 27.0))
             self.spin_cold.setValue(self.config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 20.0))
 
     def save_settings(self):

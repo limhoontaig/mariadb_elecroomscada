@@ -206,8 +206,8 @@ def serial_receive_thread():
                             # 2. 에어컨 온도 로직 판단
                             indoor_temp = values[0] / 10.0
                             outdoor_temp = values[1] / 10.0
-                            ac1_temp = values[50] / 10.0
-                            ac2_temp = values[51] / 10.0
+                            ac1_temp = values[49] / 10.0
+                            ac2_temp = values[50] / 10.0
                             check_and_control(indoor_temp, outdoor_temp, ac1_temp, ac2_temp)
                             
                             buffer = buffer[expected_len:] 
