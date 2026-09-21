@@ -18,6 +18,7 @@ import db_manager
 import excel_report
 import mariadb_backup
 from ui_dialogs import ManualMeterInputDialog, FieldInspectionDialog 
+from ui_ac_settings import ACSettingsDialog
 import plc_worker # 통신 스레드가 있는 파일을 임포트합니다.
 
 class SCADAWindow(QMainWindow):
@@ -583,107 +584,3 @@ class SCADAWindow(QMainWindow):
         else:
             self.lbl_rs485_status.setText("🔴 통신 단절")
             self.lbl_rs485_status.setStyleSheet("background-color: #c0392b; color: yellow; font-weight: bold; padding: 6px 12px; border-radius: 4px;")
-
-# ---------------------------------------------------------
-# 1. 관리자용 팝업 창 클래스 정의 (수동 제어 및 타이머 추가 버전)
-# ---------------------------------------------------------
-class ACSettingsDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("⚙️ 에어컨 자동/수동 제어 (관리자 전용)")
-        self.setFixedSize(350, 420) # 창 크기 늘림
-        self.config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
-        self.config = configparser.ConfigParser()
-        self.init_ui()
-        self.load_settings()
-
-    def init_ui(self):
-        layout = QVBoxLayout()
-        
-        # --- [1] 자동 제어 설정 그룹 ---
-        group_auto = QGroupBox("자동 제어 및 교대 시간 설정")
-        auto_layout = QVBoxLayout()
-        
-        self.spin_start1 = QDoubleSpinBox(); self.spin_start1.setRange(20.0, 35.0); self.spin_start1.setSingleStep(0.5)
-        self.spin_start2 = QDoubleSpinBox(); self.spin_start2.setRange(20.0, 35.0); self.spin_start2.setSingleStep(0.5)
-        self.spin_stop = QDoubleSpinBox(); self.spin_stop.setRange(15.0, 35.0); self.spin_stop.setSingleStep(0.5)
-        self.spin_cold = QDoubleSpinBox(); self.spin_cold.setRange(10.0, 35.0); self.spin_cold.setSingleStep(0.5)
-        # 신규: 교대 시간 스핀박스 (1시간~24시간)
-        self.spin_hours = QDoubleSpinBox(); self.spin_hours.setRange(1.0, 24.0); self.spin_hours.setSingleStep(1.0)
-
-        self.add_row(auto_layout, "1단계 기동 온도 (℃):", self.spin_start1)
-        self.add_row(auto_layout, "2단계 기동 온도 (℃):", self.spin_start2)
-        self.add_row(auto_layout, "정지 (교대) 온도 (℃):", self.spin_stop)
-        self.add_row(auto_layout, "찬바람 인식 온도 (℃):", self.spin_cold)
-        self.add_row(auto_layout, "최대 연속 가동 교대 (시간):", self.spin_hours)
-        
-        btn_save = QPushButton("설정 저장 및 자동 로직 반영")
-        btn_save.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white; padding: 10px;")
-        btn_save.clicked.connect(self.save_settings)
-        auto_layout.addWidget(btn_save)
-        
-        group_auto.setLayout(auto_layout)
-        layout.addWidget(group_auto)
-
-        # --- [2] 수동 원격 제어 그룹 ---
-        group_manual = QGroupBox("수동 원격 제어 (즉시 동작)")
-        manual_layout = QHBoxLayout()
-        
-        btn_on_1 = QPushButton("1호기 켜기")
-        btn_on_1.setStyleSheet("background-color: #3498db; color: white; padding: 8px;")
-        btn_on_1.clicked.connect(lambda: self.trigger_manual("ON_1"))
-        
-        btn_on_2 = QPushButton("2호기 켜기")
-        btn_on_2.setStyleSheet("background-color: #9b59b6; color: white; padding: 8px;")
-        btn_on_2.clicked.connect(lambda: self.trigger_manual("ON_2"))
-        
-        btn_off_all = QPushButton("전체 끄기")
-        btn_off_all.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px; font-weight: bold;")
-        btn_off_all.clicked.connect(lambda: self.trigger_manual("OFF_ALL"))
-        
-        manual_layout.addWidget(btn_on_1)
-        manual_layout.addWidget(btn_on_2)
-        manual_layout.addWidget(btn_off_all)
-        
-        group_manual.setLayout(manual_layout)
-        layout.addWidget(group_manual)
-
-        self.setLayout(layout)
-
-    def add_row(self, layout, label_text, widget):
-        row = QHBoxLayout()
-        row.addWidget(QLabel(label_text))
-        row.addWidget(widget)
-        layout.addLayout(row)
-
-    def load_settings(self):
-        self.config.read(self.config_path, encoding='utf-8')
-        if 'AC_SETTINGS' in self.config:
-            self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.5))
-            self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0))
-            self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 27.5))
-            self.spin_cold.setValue(self.config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 26.0))
-            self.spin_hours.setValue(self.config['AC_SETTINGS'].getfloat('MAX_RUN_HOURS', 3.0))
-
-    def save_settings(self):
-        if 'AC_SETTINGS' not in self.config:
-            self.config['AC_SETTINGS'] = {}
-        self.config['AC_SETTINGS']['START_TEMP_1'] = str(self.spin_start1.value())
-        self.config['AC_SETTINGS']['START_TEMP_2'] = str(self.spin_start2.value())
-        self.config['AC_SETTINGS']['STOP_TEMP'] = str(self.spin_stop.value())
-        self.config['AC_SETTINGS']['COLD_WIND_TEMP'] = str(self.spin_cold.value())
-        self.config['AC_SETTINGS']['MAX_RUN_HOURS'] = str(self.spin_hours.value())
-
-        with open(self.config_path, 'w', encoding='utf-8') as f:
-            self.config.write(f)
-        
-        import plc_worker
-        plc_worker.load_ac_settings() 
-        QMessageBox.information(self, "저장 완료", "자동 설정값이 즉시 반영되었습니다.")
-
-    def trigger_manual(self, action):
-        """수동 버튼 클릭 시 plc_worker의 제어 함수 호출"""
-        import plc_worker
-        plc_worker.force_manual_control(action)
-        action_names = {"ON_1": "1호기 켜기", "ON_2": "2호기 켜기", "OFF_ALL": "전체 에어컨 끄기"}
-        QMessageBox.information(self, "수동 제어", f"[{action_names[action]}] 명령이 전송되었습니다.\n자동 타이머가 초기화됩니다.")
