@@ -139,8 +139,8 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2, total_loa
     if ac_state == "STANDBY":
         # 조건 1: 실내 온도가 기본 기동 온도(예: 29.5도)에 도달했거나
         # 조건 2: (예측 제어 조건 발동) AND (실내가 26.0도 이상으로 냉방이 필요한 상태일 때)
-        if (indoor_temp >= TEMP_START_1) or (is_heavy_load and indoor_temp >= 26.0):
-            
+        if (indoor_temp >= TEMP_START_1) or (is_heavy_load and indoor_temp >= 27.0):
+           
             # 터미널 창에 기동 사유를 명확히 출력해 줍니다.
             if indoor_temp >= TEMP_START_1:
                 print(f"\n[일반 기동] 실내 온도 {indoor_temp:.1f}C 도달. 선행 {lead_ac}호기 가동!")
@@ -176,7 +176,7 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2, total_loa
             ac_state = "STARTING_2"
             ac_start_time = current_time
             
-        elif indoor_temp <= TEMP_STOP:
+        elif (indoor_temp <= TEMP_STOP) or (not is_heavy_load):
             print(f"\n[온도 안정화] 실내 {indoor_temp:.1f}C. {lead_ac}호기 정지 및 순번 교대!")
             threading.Thread(target=send_ir_task, args=(hubs[lead_ac], IR_TURN_OFF)).start()
             lead_ac = lag_ac  
@@ -191,7 +191,7 @@ def check_and_control(indoor_temp, outdoor_temp, dis_temp1, dis_temp2, total_loa
             print(f"[{lag_ac}호기 찬바람 미감지] 점검 요망!")
 
     elif ac_state == "COOLING_2":
-        if indoor_temp <= TEMP_STOP:
+        if (indoor_temp <= TEMP_STOP) or (not is_heavy_load):
             print(f"\n[전체 온도 안정화] 실내 {indoor_temp:.1f}C. 전호기 정지 및 순번 교대!")
             threading.Thread(target=send_ir_task, args=(HUB1_IP, IR_TURN_OFF)).start()
             threading.Thread(target=send_ir_task, args=(HUB2_IP, IR_TURN_OFF)).start()
