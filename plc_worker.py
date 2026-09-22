@@ -8,7 +8,7 @@ from datetime import datetime
 from PyQt5.QtCore import QObject, pyqtSignal
 
 from db_manager import DATA_LABELS, get_db_raw_connection
-from ac_controller import ac_manager  # 💡 분리된 에어컨 매니저 호출
+from ac_controller import ac_manager
 
 config_path = os.path.join(os.path.dirname(__file__), 'config.ini')
 
@@ -53,6 +53,13 @@ def serial_receive_thread():
                     time.sleep(2)
                     continue 
 
+            # 💡 [핵심 수정 1] 타임아웃을 5초에서 15초로 늘림 (10초 하트비트를 여유롭게 수용)
+            if time.time() - last_success_time > 15.0:
+                now = time.time()
+                if current_status != False or (now - last_emit_time > 3.0):
+                    comm_signal.status_changed.emit(False)
+                    current_status = False; last_emit_time = now
+
             if ser.in_waiting > 0:
                 buffer += ser.read(ser.in_waiting)
                 
@@ -82,7 +89,6 @@ def serial_receive_thread():
                             
                             insert_raw_data(values)
                             
-                            # 💡 분리된 에어컨 매니저에게 데이터를 넘겨 판단 지시
                             ac_manager.check_and_control(
                                 indoor_temp=values[0]/10.0, 
                                 outdoor_temp=values[1]/10.0, 
@@ -92,11 +98,11 @@ def serial_receive_thread():
                             )
                             
                             buffer = buffer[expected_len:] 
+                            last_success_time = time.time()
                             now = time.time()
                             if current_status != True or (now - last_emit_time > 3.0):
                                 comm_signal.status_changed.emit(True)
                                 current_status = True; last_emit_time = now
-                            last_success_time = time.time()
                         else:
                             buffer = buffer[1:]
 
@@ -115,7 +121,7 @@ def serial_receive_thread():
                                 if current_addr == 0:
                                     reply_data.append(1)
                                 elif current_addr == 1:
-                                    reply_data.append(ac_manager.fan_control_cmd) # 💡 매니저의 상태값 전송
+                                    reply_data.append(ac_manager.fan_control_cmd) 
                                 else:
                                     reply_data.append(0)
                             
@@ -123,6 +129,13 @@ def serial_receive_thread():
                             reply_without_crc = struct.pack('>BBB', MY_SLAVE_ID, func_code, byte_count) + struct.pack(f'>{num_words}H', *reply_data)
                             ser.write(reply_without_crc + calculate_crc(reply_without_crc))
                             buffer = buffer[expected_len:]
+                            
+                            # 💡 [핵심 수정 2] 10초 하트비트 수신 시에도 화면을 파란불로 바꾸고 끊김 방지 타이머 리셋!
+                            last_success_time = time.time()
+                            now = time.time()
+                            if current_status != True or (now - last_emit_time > 3.0):
+                                comm_signal.status_changed.emit(True)
+                                current_status = True; last_emit_time = now
                         else:
                             buffer = buffer[1:]
                     else:

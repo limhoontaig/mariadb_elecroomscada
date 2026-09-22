@@ -28,14 +28,9 @@ class InitWorker(QThread):
         db_manager.init_db()
         time.sleep(0.3) 
         
-        # 2단계: PLC 통신 스레드 기동 
-        # (주의: 여기서 데몬 스레드로 확실하게 띄워주어야 통신이 먹통되지 않습니다)
-        self.progress_signal.emit("🔌 PLC 통신 엔진 시작 중...")
-        t = threading.Thread(target=plc_worker.serial_receive_thread, daemon=True)
-        t.start()
-        time.sleep(0.3)
+        # (수정됨) 통신 스레드 기동 부분을 메인 화면 생성 이후로 옮기기 위해 여기서 삭제합니다.
         
-        # 3단계: 준비 완료 신호
+        # 2단계: 준비 완료 신호
         self.progress_signal.emit("🖥️ 시스템 화면 생성 중...")
         self.finished_signal.emit()
 
@@ -92,9 +87,13 @@ if __name__ == "__main__":
         win = SCADAWindow()
         center_window(win)
 
-        # 💡 [가장 중요한 핵심 코드] 통신 모듈과 메인 화면 라벨을 여기서 연결해야 화면에 '통신 정상'이 뜹니다.
         import plc_worker
+        # 💡 [핵심 해결책 1] 메인 화면이 다 만들어진 후 통신 시그널 귀를 먼저 엽니다.
         plc_worker.comm_signal.status_changed.connect(win.update_rs485_status)
+        
+        # 💡 [핵심 해결책 2] 수신 준비가 완벽히 끝난 상태에서 통신 엔진을 가동합니다.
+        t = threading.Thread(target=plc_worker.serial_receive_thread, daemon=True)
+        t.start()
         
         win.setWindowFlags(win.windowFlags() | Qt.WindowStaysOnTopHint)
         win.show()
