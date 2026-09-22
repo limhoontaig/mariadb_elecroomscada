@@ -1,17 +1,12 @@
-# main.py
+# maria_main.py
 import sys
 import threading
 import time
-from PyQt5.QtWidgets import QApplication, QSplashScreen, QDesktopWidget
-from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal
-from PyQt5.QtGui import QCursor, QFont
 from PyQt5.QtWidgets import QApplication, QSplashScreen, QDesktopWidget, QMessageBox
 from PyQt5.QtCore import Qt, QCoreApplication, QThread, pyqtSignal, QSharedMemory
+from PyQt5.QtGui import QCursor, QFont
 
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtCore import QSharedMemory
-
-# 최상위 관리 모듈 로드 (윈도우 로드는 지연 가능하도록 아래에서 하거나 그대로 둠)
+# 최상위 관리 모듈 로드
 import db_manager
 import plc_worker
 
@@ -28,12 +23,13 @@ class InitWorker(QThread):
     finished_signal = pyqtSignal()
 
     def run(self):
-        # 1단계: DB 초기화 (가장 오래 걸리는 작업)
+        # 1단계: DB 초기화 
         self.progress_signal.emit("⚡ 데이터베이스 연결 및 구성 중...")
         db_manager.init_db()
         time.sleep(0.3) 
         
-        # 2단계: PLC 통신 스레드 기동
+        # 2단계: PLC 통신 스레드 기동 
+        # (주의: 여기서 데몬 스레드로 확실하게 띄워주어야 통신이 먹통되지 않습니다)
         self.progress_signal.emit("🔌 PLC 통신 엔진 시작 중...")
         t = threading.Thread(target=plc_worker.serial_receive_thread, daemon=True)
         t.start()
@@ -43,11 +39,10 @@ class InitWorker(QThread):
         self.progress_signal.emit("🖥️ 시스템 화면 생성 중...")
         self.finished_signal.emit()
 
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
 
-    # ⭐ [신규] 프로그램 중복 실행 방지
+    # 프로그램 중복 실행 방지
     shared_memory = QSharedMemory("LS_PLC_SCADA_Shared_Memory")
     if not shared_memory.create(1):
         msg = QMessageBox()
@@ -57,7 +52,7 @@ if __name__ == "__main__":
         msg.exec_()
         sys.exit(0)
     
-    # 1. Splash Screen 즉시 생성 및 표시 (메인 스레드 가볍게 유지)
+    # 1. Splash Screen 즉시 생성 및 표시
     splash = QSplashScreen()
     splash.setFixedSize(600, 400)
     splash.setStyleSheet("""
@@ -79,56 +74,40 @@ if __name__ == "__main__":
     splash.showMessage("\n\n\n\n🚀 시스템 엔진 기동 준비 중...", 
                        Qt.AlignCenter | Qt.AlignVCenter, Qt.white)
     
-    # Splash 화면을 OS가 즉시 그리도록 강제 이벤트를 처리
-    # 이 시점에는 무거운 객체가 전혀 없으므로 Splash가 0.1초 만에 팍 뜹니다.
     for _ in range(5):
         QCoreApplication.processEvents()
     
-    # 2. 백그라운드 스레드 생성 및 시작
     worker = InitWorker()
     
-    # 진행 메시지 반영
     worker.progress_signal.connect(
         lambda msg: splash.showMessage(f"\n\n\n\n{msg}", Qt.AlignCenter | Qt.AlignVCenter, Qt.white)
     )
     
-    # 전역 참조용 메인 윈도우 변수 선언 (가비지 컬렉션 방지)
     win = None
     
-    # ⭐ [핵심 개선] DB 초기화 등이 '완전히 끝난 후' 메인 윈도우를 비로서 임포트하고 생성합니다.
     def on_init_finished():
         global win
-        
-        # 메인 윈도우 모듈을 이 시점에 로드하여 초기 기동 속도를 극대화
         from ui_main_window import SCADAWindow 
         
-        # DB 작업이 끝난 평온한 상태에서 메인 창 생성
         win = SCADAWindow()
         center_window(win)
 
-        # =================================================================
-        # ⭐ [누락된 부분 추가] plc_worker의 시그널을 화면의 상태 변경 함수와 연결합니다!
+        # 💡 [가장 중요한 핵심 코드] 통신 모듈과 메인 화면 라벨을 여기서 연결해야 화면에 '통신 정상'이 뜹니다.
         import plc_worker
         plc_worker.comm_signal.status_changed.connect(win.update_rs485_status)
-        # =================================================================
         
-        # 최상단 고정으로 메인 화면 표시
         win.setWindowFlags(win.windowFlags() | Qt.WindowStaysOnTopHint)
         win.show()
         
-        # 고정 해제 및 포커스 집중
         win.setWindowFlags(win.windowFlags() & ~Qt.WindowStaysOnTopHint) 
         win.show()
         win.raise_()
         win.activateWindow()
         
-        # 로딩 창 깔끔하게 종료
         splash.finish(win)
         app.restoreOverrideCursor()
 
     worker.finished_signal.connect(on_init_finished)
-    
-    # 3. 백그라운드 초기화 작업 시작
     worker.start()
     
     sys.exit(app.exec_())
