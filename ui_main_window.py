@@ -207,8 +207,27 @@ class SCADAWindow(QMainWindow):
         self.btn_export_excel.clicked.connect(self.export_excel_click)
         self.btn_meter_input.clicked.connect(self.click_open_meter_popup)
         self.qdate.dateChanged.connect(self.auto_refresh)
+        # 👇 [여기 2줄 추가] 에어컨 매니저의 신호를 UI 팝업창 띄우는 함수와 연결!
+        from ac_controller import ac_manager
+        ac_manager.signals.alert_msg.connect(self.show_ac_alert)
 
         self.load_data()
+
+    # 👇 [새로운 함수 추가] 날아온 신호를 받아 팝업을 그리는 함수
+    def show_ac_alert(self, msg):
+        """화면 멈춤 현상이 없는 비모달(Non-Modal) 팝업 알림창"""
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle("❄️ 에어컨 시스템 자동 제어 알림")
+        msg_box.setText(msg)
+        
+        # 💡 핵심 설정: 팝업이 떠 있어도 뒤쪽 메인 화면(그래프/표)은 정상 작동하도록 허용
+        msg_box.setModal(False) 
+        
+        # 관리자가 나중에 확인하고 [X]를 누르면 메모리에서 깔끔하게 자동 삭제됨
+        msg_box.setAttribute(Qt.WA_DeleteOnClose) 
+        
+        msg_box.show()
 
     def open_ac_settings_dialog(self, event):
         dialog = ACSettingsDialog(self)

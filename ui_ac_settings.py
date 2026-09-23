@@ -69,14 +69,18 @@ class ACSettingsDialog(QDialog):
         layout.addLayout(row)
 
     def load_settings(self):
+        """💡 설정창을 열 때도 튕기지 않도록 try-except 추가"""
         if os.path.exists(self.config_path):
-            self.config.read(self.config_path, encoding='utf-8')
-            if 'AC_SETTINGS' in self.config:
-                self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.5))
-                self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0))
-                self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 27.5))
-                self.spin_cold.setValue(self.config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 26.0))
-                self.spin_hours.setValue(self.config['AC_SETTINGS'].getfloat('MAX_RUN_HOURS', 3.0))
+            try:
+                self.config.read(self.config_path, encoding='utf-8-sig')
+                if 'AC_SETTINGS' in self.config:
+                    self.spin_start1.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_1', 28.5))
+                    self.spin_start2.setValue(self.config['AC_SETTINGS'].getfloat('START_TEMP_2', 31.0))
+                    self.spin_stop.setValue(self.config['AC_SETTINGS'].getfloat('STOP_TEMP', 27.5))
+                    self.spin_cold.setValue(self.config['AC_SETTINGS'].getfloat('COLD_WIND_TEMP', 26.0))
+                    self.spin_hours.setValue(self.config['AC_SETTINGS'].getfloat('MAX_RUN_HOURS', 3.0))
+            except Exception as e:
+                QMessageBox.warning(self, "설정 로드 오류", f"config.ini 파일에 오류가 있어 기본값으로 표시됩니다.\n\n상세: {e}")
 
     def save_settings(self):
         if 'AC_SETTINGS' not in self.config:

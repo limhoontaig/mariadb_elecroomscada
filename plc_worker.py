@@ -34,6 +34,7 @@ def serial_receive_thread():
     current_status = None
     last_success_time = time.time()
     last_emit_time = time.time() 
+    last_db_save_time = 0
     ser = None
     buffer = b""
 
@@ -87,8 +88,15 @@ def serial_receive_thread():
                                 
                             values = (list(raw_words[:15]) + [dint_mwh] + list(raw_words[17:]))
                             
-                            insert_raw_data(values)
+                            # 👇👇👇 [여기서부터 핵심 수정] 👇👇👇
+                            current_time = time.time()
                             
+                            # 1. DB 저장은 60초가 넘었을 때만 한 번씩 실행 (로깅 주기 제한)
+                            if current_time - last_db_save_time >= 58.0:
+                                insert_raw_data(values)
+                                last_db_save_time = current_time # 마지막 저장 시간 갱신
+                            
+                            # 2. 에어컨 온도 판단(제어) 로직은 10초마다 들어올 때마다 즉시 실행! (반응속도 극대화)
                             ac_manager.check_and_control(
                                 indoor_temp=values[0]/10.0, 
                                 outdoor_temp=values[1]/10.0, 
@@ -143,6 +151,8 @@ def serial_receive_thread():
             time.sleep(0.01)
             
         except Exception as e:
+            # 👇👇👇 [여기 추가!] 에러가 나면 무작정 재시작하지 말고 이유를 출력하게 만듭니다.
+            print(f"⚠️ 백그라운드 통신 에러 발생: {e}")
             if ser: ser.close(); ser = None
             time.sleep(1)
 
